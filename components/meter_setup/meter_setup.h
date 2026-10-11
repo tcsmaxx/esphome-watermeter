@@ -1,0 +1,142 @@
+#pragma once
+#include <mutex>
+#include <memory>
+#include "alignment.h"
+#include "esphome/components/light/addressable_light_effect.h"
+#include "esp_heap_caps.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/core/component.h"
+#include "esphome/core/preferences.h"
+#include "esphome/components/esp32_camera/esp32_camera.h"
+#include "esphome/components/meter_reader_tflite/meter_reader_tflite.h"
+#include "esphome/components/web_server_base/web_server_base.h"
+#include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/components/sensor/sensor.h"
+namespace esphome::meter_setup {
+class AlignedMeterReader;
+struct Settings {
+  uint32_t version{1};
+  uint16_t boxes[8][4]{};
+  uint32_t baseline{0}, max_step{1000}, interval{60};
+  uint8_t decimals{3}, calibrated{0};
+};
+struct Configuration {
+  uint32_t version{1};
+  Settings settings{};
+  AlignmentReference alignment{};
+};
+struct LegacyIlluminationSettings {
+  uint32_t version{1};
+  uint16_t settle_ms{1000};
+  uint8_t enabled{0}, brightness{30};
+};
+struct IlluminationSettings {
+  uint32_t version{2};
+  uint16_t settle_ms{1000};
+  uint8_t enabled{0}, brightness{30};
+  uint16_t led_count{8};
+};
+class MeterSetup;
+class CountedWhiteEffect : public light::AddressableLightEffect {
+ public:
+  explicit CountedWhiteEffect(MeterSetup *owner) : light::AddressableLightEffect("Zählerlicht"),owner_(owner) {}
+  void start() override {initial_=true;}
+  void apply(light::AddressableLight &it,const Color &color) override;
+ protected:
+  MeterSetup *owner_;
+  bool initial_{true};
+  uint16_t last_count_{0};
+  float last_brightness_{-1};
+  Color last_color_{};
+};
+class MeterSetup : public Component, public camera::CameraListener, public AsyncWebHandler {
+ public:
+  std::shared_ptr<camera::CameraImage> align_image_(const std::shared_ptr<camera::CameraImage> &image);
+  void set_illumination(light::AddressableLightState *v) {illumination_=v;v->add_effects({&illumination_effect_});}
+  uint16_t get_active_led_count() const {return illumination_led_count_;}
+  uint16_t led_capacity_() const;
+  bool accepts_reader_frame_();
+  void set_camera(esp32_camera::ESP32Camera *v) { camera_ = v; }
+  void set_reader(meter_reader_tflite::MeterReaderTFLite *v) { reader_ = v; }
+  void set_log(text_sensor::TextSensor *v) { log_ = v; }
+  void set_server(web_server_base::WebServerBase *v) { server_ = v; }
+  void set_value(sensor::Sensor *v) { value_ = v; }
+  void set_change(sensor::Sensor *v) { change_=v; }
+  void set_flow(sensor::Sensor *v) { flow_=v; }
+  void set_last_update(text_sensor::TextSensor *v) { last_update_=v; }
+  void set_status(text_sensor::TextSensor *v) { status_sensor_=v; }
+  void set_error(text_sensor::TextSensor *v) { error_sensor_=v; }
+  void set_problem(binary_sensor::BinarySensor *v) { problem_=v; }
+  void setup() override;
+  void loop() override;
+  float get_setup_priority() const override { return setup_priority::LATE - 1; }
+  void on_camera_image(const std::shared_ptr<camera::CameraImage> &image) override;
+  bool canHandle(AsyncWebServerRequest *request) const override;
+  void handleRequest(AsyncWebServerRequest *request) override;
+ protected:
+  bool save_configuration_(const Settings &settings,const AlignmentReference &alignment,bool flush);
+  bool capture_references_();
+  void begin_capture_(bool inference);
+  void illumination_loop_();
+  void set_illumination_(bool on,const IlluminationSettings &settings);
+  bool save_illumination_(const IlluminationSettings &settings);
+  void reset_illumination_();
+  void start_(bool test);
+  void reset_();
+  void diagnostics_();
+  void result_(const std::string &s);
+  std::string status_();
+  static int invalid_box_(const Settings &s);
+  static bool valid_(const Settings &s);
+  esp32_camera::ESP32Camera *camera_{};
+  meter_reader_tflite::MeterReaderTFLite *reader_{};
+  text_sensor::TextSensor *log_{};
+  web_server_base::WebServerBase *server_{};
+  sensor::Sensor *value_{}, *change_{}, *flow_{};
+  text_sensor::TextSensor *last_update_{}, *status_sensor_{}, *error_sensor_{};
+  binary_sensor::BinarySensor *problem_{};
+  uint32_t last_accepted_at_{0};
+  bool have_previous_reading_{false}, reading_problem_{false};
+  std::string diagnostic_status_, diagnostic_error_{"__initial__"}, reading_error_;
+  light::AddressableLightState *illumination_{nullptr};
+  CountedWhiteEffect illumination_effect_{this};
+  uint16_t illumination_led_count_{8};
+  ESPPreferenceObject illumination_preference_;
+  IlluminationSettings illumination_settings_{},pending_illumination_{};
+  bool capture_pending_{false}, capture_inference_{false}, flush_received_{false}, inference_started_{false};
+  uint8_t capture_stage_{0};
+  uint32_t capture_deadline_{0}, capture_started_{0}, light_test_deadline_{0};
+  bool light_test_{false},illumination_on_{false};
+  ESPPreferenceObject preference_;
+  Settings settings_{}, pending_{};
+  AlignmentReference alignment_{}, draft_alignment_{}, pending_alignment_{}, active_alignment_{};
+  std::shared_ptr<uint8_t> displayed_jpeg_, reference_capture_;
+  size_t displayed_size_{0}, reference_capture_size_{0};
+  uint32_t displayed_frame_{0}, reference_revision_{0}, alignment_ms_{0};
+  AlignmentMatch alignment_matches_[2]{};
+  std::string alignment_result_{"Ausgeschaltet"};
+  std::mutex mutex_;
+  std::shared_ptr<uint8_t> jpeg_;
+  size_t jpeg_size_{0};
+  std::string message_{"Noch nicht eingerichtet"};
+  std::string status_json_, http_task_name_;
+  uint32_t status_updated_{0}, http_stack_free_{0};
+  std::string digits_;
+  uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
+  float confidence_{0};
+  bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
+  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE } command_{NONE};
+  bool paused_{true};
+};
+class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {
+ public:
+  void arm_for_capture() {
+    std::lock_guard<std::mutex> lock(frame_mutex_);
+    pending_frame_.reset();frame_state_.store(FrameState::IDLE);
+  }
+  void set_alignment_owner(MeterSetup *owner) {owner_=owner;}
+  void on_camera_image(const std::shared_ptr<camera::CameraImage> &image) override;
+ protected:
+  MeterSetup *owner_{nullptr};
+};
+}

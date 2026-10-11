@@ -1,0 +1,171 @@
+substitutions:
+  device_name: wasserzaehler
+  friendly_name: Wasserzähler
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.9.1
+  # Limit build-host RAM usage while compiling TensorFlow Lite.
+  compile_process_limit: 1
+
+esp32:
+  board: seeed_xiao_esp32s3
+  flash_size: 8MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    advanced:
+      loop_task_stack_size: 32768
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: Wasserzaehler Setup
+    password: !secret fallback_password
+
+captive_portal:
+
+preferences:
+  flash_write_interval: 5min
+
+web_server_base:
+  id: meter_web_base
+
+web_server:
+  port: 80
+  version: 3
+  auth:
+    type: digest
+    username: !secret web_username
+    password: !secret web_password
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/nliaudat/esphome_ai_component
+      ref: 048f6e932b9f90cb7a7a23a2e07f80fa65a987e7
+    components: [meter_reader_tflite, tflite_micro_helper, esp32_camera_utils]
+    refresh: never
+  - source:
+      type: git
+      url: https://github.com/tcsmaxx/esphome-watermeter
+      ref: main
+    components: [meter_setup]
+    refresh: 0s
+
+i2c:
+  id: camera_bus
+  sda: GPIO40
+  scl: GPIO39
+  scan: false
+
+esp32_camera:
+  id: meter_camera
+  name: Kamerabild
+  external_clock:
+    pin: GPIO10
+    frequency: 20MHz
+  i2c_id: camera_bus
+  data_pins: [GPIO15, GPIO17, GPIO18, GPIO16, GPIO14, GPIO12, GPIO11, GPIO48]
+  vsync_pin: GPIO38
+  href_pin: GPIO47
+  pixel_clock_pin: GPIO13
+  resolution: 640x480
+  jpeg_quality: 10
+  max_framerate: 1 fps
+  idle_framerate: 0.2 fps
+  frame_buffer_location: PSRAM
+  vertical_flip: false
+  horizontal_mirror: false
+
+esp32_camera_utils:
+  id: camera_utils
+  camera_id: meter_camera
+  enable_rotation: false
+  enable_scaler: false
+  enable_cropper: false
+  enable_drawing: false
+
+tflite_micro_helper:
+  - id: digit_model
+    model_type: image
+    model:
+      type: git
+      url: https://github.com/nliaudat/esphome_ai_component
+      ref: 048f6e932b9f90cb7a7a23a2e07f80fa65a987e7
+      file: models/digit_recognizer_v3_quantized_integer_quant_uint8.tflite
+
+globals:
+  - id: component_globals_placeholder
+    type: bool
+    initial_value: "false"
+
+time:
+  - platform: homeassistant
+    id: meter_time
+    timezone: Europe/Berlin
+
+text_sensor:
+  - platform: template
+    id: inference_log
+    internal: true
+
+sensor:
+  - platform: template
+    id: recognition_time
+    name: Ablesedauer
+    unit_of_measurement: ms
+    accuracy_decimals: 0
+    entity_category: diagnostic
+
+meter_reader_tflite:
+  id: digit_reader
+  camera_id: meter_camera
+  model: digit_model
+  camera_resolution: 640x480
+  confidence_threshold: 0.90
+  generate_preview: false
+  show_crop_areas: false
+  inference_logs: inference_log
+  capture_to_publish_time_sensor: recognition_time
+  update_interval: never
+
+# SK6812 RGBW, neutralweiß, 5 V. Tatsächliche Anzahl im Setup einstellen.
+light:
+  - platform: esp32_rmt_led_strip
+    id: meter_illumination
+    internal: true
+    pin: GPIO2  # XIAO D1; nicht mit DIN/DOUT am Streifen verwechseln.
+    chipset: SK6812
+    channel_colors: GRBW
+    num_leds: 64  # reservierte Kapazität; tatsächliche Anzahl im Setup
+    gamma_correct: 1.0
+    default_transition_length: 0s
+    restore_mode: ALWAYS_OFF
+
+meter_setup:
+  id: meter_configuration
+  illumination_id: meter_illumination
+  camera_id: meter_camera
+  reader_id: digit_reader
+  log_id: inference_log
+  web_server_base_id: meter_web_base
+  value:
+    name: Zählerstand

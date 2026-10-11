@@ -1,0 +1,6 @@
+.esphome/
+secrets.yaml
+validation.yaml
+__pycache__/
+*.pyc
+node_modules/

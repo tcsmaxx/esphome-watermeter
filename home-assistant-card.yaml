@@ -1,0 +1,64 @@
+type: custom:stack-in-card
+title: ''
+mode: vertical
+cards:
+  - type: custom:mini-graph-card
+    animate: true
+    hour24: true
+    icon: mdi:water
+    entities:
+      - sensor.garten_wasserzaehler_durchfluss
+    line_color: lightgreen
+    line_width: 2
+    font_size: 60
+    font_size_header: 10
+    hours_to_show: 24
+    points_per_hour: 10
+    height: 55
+    show:
+      name: false
+      icon: false
+    color_thresholds:
+      - value: 1
+        color: red
+      - value: 0.5
+        color: LightSkyBlue
+      - value: 0
+        color: DodgerBlue
+  - type: entities
+    title: ''
+    state_color: true
+    entities:
+      - entity: sensor.garten_wasserzaehler_anderung_zu_vorwert
+        name: Änderung zu Vorwert
+      - entity: sensor.garten_wasserzaehler_letzte_aktualisierung
+        name: Letzte Aktualisierung
+      - entity: binary_sensor.garten_wasserzaehler_ableseproblem
+        name: Problem
+      - entity: sensor.garten_wasserzaehler_ablesestatus
+        name: Status
+      - entity: sensor.garten_wasserzaehler_ablesefehler
+        name: Fehler
+    card_mod:
+      style: |
+        #states > * {
+          margin: -13px 0px !important;
+        }
+  - type: picture-entity
+    entity: camera.wasserzaehler_kamerabild
+    camera_view: auto
+    show_state: false
+    show_name: false
+  - type: entity
+    name: Wasser Zählerstand
+    entity: sensor.wasserzaehler_zahlerstand
+    unit: m³
+    state_color: false
+    card_mod:
+      style:
+        .: |
+          ha-card .value {
+            color: lightgreen;
+            font-family: 'Seven Segment';
+            font-size: 30px !important;
+          }
