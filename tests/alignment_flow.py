@@ -45,6 +45,8 @@ class MeterSetup {
  Settings settings_{},pending_{};AlignmentReference active_alignment_{};AlignmentMatch alignment_matches_[2]{};
  std::string alignment_result_,message_,reading_error_;bool reading_problem_=false;
  meter_reader_tflite::MeterReaderTFLite *reader_{};
+ std::shared_ptr<uint8_t> preview_;size_t preview_size_=0;uint32_t preview_sequence_=0;bool preview_rgb_=false;
+ void set_preview_(const std::shared_ptr<uint8_t>&v,size_t n,bool rgb){preview_=v;preview_size_=n;preview_rgb_=rgb;}
  bool accepts_reader_frame_(){return busy_;}
  void set_illumination_(bool,const IlluminationSettings&){}
  bool inference_started_=true,light_test_=false;IlluminationSettings pending_illumination_{};
@@ -72,7 +74,7 @@ int main(){
  owner.active_alignment_.enabled=owner.active_alignment_.ready=1;
  uint16_t regions[2][4]={{120,210,152,242},{480,210,512,242}};memcpy(owner.active_alignment_.regions,regions,sizeof(regions));
  owner.test_=true;owner.settings_.calibrated=1;reader.frame_state_=meter_reader_tflite::MeterReaderTFLite::FrameState::REQUESTED;reader.on_camera_image(image);
- assert(reader.calls==1&&!reader.pending_frame_&&!owner.busy_&&!owner.accepted_&&reader.paused);
+ assert(!owner.preview_);assert(reader.calls==1&&!reader.pending_frame_&&!owner.busy_&&!owner.accepted_&&reader.paused);
  assert(owner.settings_.baseline==1864266&&!owner.reading_problem_&&reader.crops=="saved crops"); // Test failure restores saved crops and isolates HA.
  owner.test_=false;owner.busy_=true;reader.frame_state_=meter_reader_tflite::MeterReaderTFLite::FrameState::REQUESTED;reader.on_camera_image(image);
  assert(reader.calls==1&&owner.reading_problem_&&owner.reading_error_.find("Ausrichtungsfehler")!=std::string::npos&&owner.settings_.baseline==1864266);
@@ -82,6 +84,7 @@ int main(){
  for(int i=0;i<8;i++){auto &b=owner.settings_.boxes[i];b[0]=100+i*40;b[1]=100;b[2]=130+i*40;b[3]=150;}
  owner.busy_=true;reader.frame_state_=meter_reader_tflite::MeterReaderTFLite::FrameState::REQUESTED;reader.on_camera_image(image);
  assert(reader.calls==2&&reader.pending_frame_!=image&&reader.pending_frame_->get_data_length()==640*480*3&&owner.alignment_result_=="OK");
+ assert(owner.preview_rgb_&&owner.preview_size_==640*480*3&&owner.preview_.get()==reader.pending_frame_->get_data_buffer());
  assert(reader.pending_frame_->was_requested_by(camera::WEB_REQUESTER)&&!reader.pending_frame_->was_requested_by(camera::API_REQUESTER));
  assert(memcmp(reader.pending_frame_->get_data_buffer(),image->pixels.data(),image->pixels.size())==0); // Same corrected frame reaches the reader.
  std::cout<<"Alignment flow passed: zero-cost disabled path, no inference on failure, crop restore, unchanged baseline, HA error, same-image successful handoff\n";

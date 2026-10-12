@@ -56,6 +56,7 @@ class MeterSetup {
   std::string reading_error_,last_reader_log_;
   RecoveryRecord recovery_{};struct RecoveryPref{bool save(RecoveryRecord*){return true;}} recovery_preference_;
   void record_fault_(const std::string&,bool){}
+  std::shared_ptr<uint8_t> preview_;size_t preview_size_=0;uint32_t preview_sequence_=0;
   Preference preference_;
   Settings settings_{},pending_{}; AlignmentReference alignment_{},draft_alignment_{},pending_alignment_{},active_alignment_{};std::shared_ptr<unsigned char> reference_capture_;std::string alignment_result_;uint32_t alignment_ms_=0;
   std::mutex mutex_;

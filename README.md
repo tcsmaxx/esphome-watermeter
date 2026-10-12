@@ -62,7 +62,7 @@ Auf großen Bildschirmen stehen die Einstellungen links und das Kamerabild recht
 5. Den tatsächlichen Stand von Hand ablesen und als acht Ziffern ohne Komma eingeben: `00123,456 m³` entspricht `00123456`. Nachkommastellen, Ableseintervall und maximalen Sprung einstellen.
 6. **Speichern & Automatik starten** sichert die Konfiguration und aktiviert die regelmäßige Ablesung.
 
-Die Ausschnittvorschau zeigt jede Ziffer separat. Ein Klick auf einen Ausschnitt wählt den entsprechenden Rahmen aus. Im Werkzeug **Verschieben** lassen sich vorhandene Rahmen mit der Maus oder per Touch bewegen. X, Y, Breite und Höhe können direkt eingegeben oder in Schritten von 1, 5 oder 10 Pixeln angepasst werden. Pfeiltasten im fokussierten Kamerabild bewegen den Rahmen um einen Pixel; Umschalt + Pfeiltaste um zehn Pixel.
+Die Ausschnittvorschau zeigt jede Ziffer separat. Ein Klick auf einen Ausschnitt wählt den entsprechenden Rahmen aus. Unter **Bildansicht** lässt sich zwischen **Rohbild · Einrichtung** und **KI-Bild · Erkennung prüfen** umschalten. Im Werkzeug **Verschieben** lassen sich vorhandene Rahmen mit der Maus oder per Touch bewegen. X, Y, Breite und Höhe können direkt eingegeben oder in Schritten von 1, 5 oder 10 Pixeln angepasst werden. Pfeiltasten im fokussierten Kamerabild bewegen den Rahmen um einen Pixel; Umschalt + Pfeiltaste um zehn Pixel.
 
 Koordinaten beziehen sich stets auf das 640 × 480 große Kamerabild und sind unabhängig von der Darstellungsgröße. Die Rahmenmitten müssen von links nach rechts geordnet sein. Überlappungen sind zulässig, jeder Ausschnitt sollte aber ausschließlich seine eigene Ziffer enthalten. Tests veröffentlichen keinen Zählerstand an Home Assistant.
 
@@ -107,7 +107,11 @@ Vor der Erkennung sucht das Gerät beide Referenzen im neuen Kamerabild und rech
 
 Die Ausrichtung benötigt zeitweise etwa 2,1 MiB zusätzlichen PSRAM. Sie korrigiert begrenzte Montagebewegungen, verbessert aber weder Schärfe noch Beleuchtung und ersetzt keine korrekte Montage. Große Verschiebungen und Perspektivänderungen erfordern eine neue Kalibrierung.
 
-Kameraansicht und Home-Assistant-Kamerabild zeigen die Rohaufnahme. `/meter/status` enthält die Laufzeit des Ausrichtungsschritts als `alignment_ms`. Der Sensor **Ablesedauer** umfasst bei aktiver Ausrichtung auch diesen Schritt; die beiden Zeiten dürfen nicht addiert werden.
+Die Ansicht **Rohbild · Einrichtung** und das Home-Assistant-Kamerabild zeigen die Rohaufnahme. **KI-Bild · Erkennung prüfen** zeigt dagegen genau das zur Erkennung übergebene Bild einschließlich der Referenzkorrektur. Ziffernausschnitte und Rahmen beziehen sich dort auf diese Aufnahme und die bei ihrer Verarbeitung verwendete Konfiguration. Die KI-Ansicht ist schreibgeschützt; Rahmen und Referenzen werden im Rohbild eingerichtet. Ohne aktive Ausrichtung zeigt sie die unveränderte KI-Aufnahme.
+
+Mit **Rahmen testen** lässt sich eine neue KI-Aufnahme erzeugen. Die KI-Ansicht aktualisiert sich bei neuen Aufnahmen automatisch. Scheitert eine Referenzsuche, ist keine gültige KI-Aufnahme verfügbar; eine vorherige korrigierte Aufnahme wird nicht als aktuelle angezeigt. Die angezeigte Bildnummer bezeichnet die verarbeitete Aufnahme, keine bestätigte Messwertübernahme. **Neues Bild** wechselt zur Rohbildansicht und erzeugt keine neue KI-Ablesung.
+
+Für die Vorschau wird das korrigierte RGB-Bild im PSRAM gehalten (rund 0,9 MiB); es wird nicht erneut gedreht oder verlustbehaftet komprimiert. Ohne Ausrichtung wird eine Kopie des JPEG-Bilds gespeichert. `/meter/status` enthält die Laufzeit des Ausrichtungsschritts als `alignment_ms`. Der Sensor **Ablesedauer** umfasst bei aktiver Ausrichtung auch diesen Schritt; die beiden Zeiten dürfen nicht addiert werden.
 
 ## SK6812-RGBW-Beleuchtung
 
@@ -217,6 +221,7 @@ Der automatische Neustart behandelt Fehler bei weiterhin laufendem Hauptloop. Be
 | `/setup` | Einrichtung und Kalibrierung |
 | `/meter/status` | JSON mit gespeicherter Konfiguration, Betriebszustand und Diagnosen |
 | `/meter/snapshot` | Kameraschnappschuss |
+| `/meter/processed` | Letzte gültige KI-Aufnahme mit den verwendeten Rahmen als Antwortmetadaten |
 
 Webaktionen werden im Hauptloop verarbeitet. Der Status wird dort vorbereitet, um den HTTP-Task zu entlasten. Schnappschüsse verwenden eine eigene Bildkopie und halten keinen Kamerapuffer dauerhaft fest. Stackdiagnosen stehen unter `/meter/status` bereit.
 

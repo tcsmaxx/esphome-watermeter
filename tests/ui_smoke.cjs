@@ -7,12 +7,13 @@ const {chromium} = require('playwright');
  const html=fs.readFileSync(path.join(__dirname,'../components/meter_setup/web_ui.h'),'utf8').split('R"HTML(')[1].split(')HTML"')[0];
  const browser=await chromium.launch({...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),headless:true,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:800,height:1000}});
- let confirmReset=false;const errors=[],posts=[],dialogs=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());if(d.type()==='confirm'&&confirmReset)await d.accept();else await d.dismiss()});
- const state={boxes:Array.from({length:8},()=>[0,0,0,0]),decimals:3,interval:60,max_step:1000,baseline:0,reset_count:0,calibrated:false,busy:false,paused:true,frame:0,digits:'',confidence:0,message:'Noch nicht eingerichtet',illumination_available:true,illumination_led_count:8,illumination_led_capacity:64,illumination_enabled:false,illumination_brightness:30,illumination_settle_ms:1000,illumination_on:false,light_test:false,alignment_enabled:false,references:Array.from({length:2},()=>[0,0,0,0]),reference_ready:false,alignment_ms:0,alignment_result:'Ausgeschaltet'};
+ let rawPreview=null;let confirmReset=false;const errors=[],posts=[],dialogs=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());if(d.type()==='confirm'&&confirmReset)await d.accept();else await d.dismiss()});
+ const state={boxes:Array.from({length:8},()=>[0,0,0,0]),decimals:3,interval:60,max_step:1000,baseline:0,reset_count:0,calibrated:false,busy:false,paused:true,frame:0,digits:'',confidence:0,message:'Noch nicht eingerichtet',illumination_available:true,illumination_led_count:8,illumination_led_capacity:64,illumination_enabled:false,illumination_brightness:30,illumination_settle_ms:1000,illumination_on:false,light_test:false,alignment_enabled:false,references:Array.from({length:2},()=>[0,0,0,0]),reference_ready:false,alignment_ms:0,alignment_result:'Ausgeschaltet',preview_available:false,preview_sequence:0,preview_corrected:false};
  await page.route('http://meter.test/**',async route=>{
   const u=new URL(route.request().url());
   if(u.pathname==='/setup')return route.fulfill({contentType:'text/html',body:html});
   if(u.pathname==='/meter/status')return route.fulfill({contentType:'application/json',body:JSON.stringify(state)});
+  if(u.pathname==='/meter/processed'){if(!state.preview_corrected&&rawPreview)return route.fulfill({contentType:'image/jpeg',headers:{'X-Meter-Image':String(state.preview_sequence),'X-Meter-Boxes':JSON.stringify(state.boxes),'X-Meter-References':JSON.stringify(state.references)},body:rawPreview});const pixels=Buffer.alloc(640*480*3);for(let i=0;i<pixels.length;i+=3){pixels[i]=20;pixels[i+1]=140;pixels[i+2]=220;}return route.fulfill({contentType:'application/octet-stream',headers:{'X-Meter-Image':String(state.preview_sequence),'X-Meter-Boxes':JSON.stringify(state.boxes),'X-Meter-References':JSON.stringify(state.references)},body:pixels});}
   if(u.pathname==='/meter/snapshot')return route.fulfill({contentType:'image/svg+xml',headers:{'X-Meter-Frame':String(state.frame)},body:'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#ccc"/></svg>'});
   posts.push({url:u,headers:route.request().headers()});
   if(u.pathname==='/meter/light_on'){state.light_test=state.illumination_on=true;}
@@ -55,6 +56,17 @@ const {chromium} = require('playwright');
  await page.locator('.sidebar').evaluate(el=>el.scrollTop=0);
  await page.click('.crop:nth-child(3)');assert.equal(await page.inputValue('#digit'),'2');
  if(process.env.UI_SCREENSHOTS){await page.screenshot({path:'/tmp/water-setup-desktop.png',fullPage:true});}
+ state.boxes=await page.evaluate(()=>boxes);state.preview_available=true;state.preview_sequence=1;state.preview_corrected=true;
+ await page.waitForFunction(()=>previewAvailable);await page.selectOption('#view','processed');await page.waitForFunction(()=>processedReady);
+ assert.equal(await page.locator('#box_x').isDisabled(),true);assert.equal(await page.locator('#split').isDisabled(),true);
+ assert.deepEqual(await page.evaluate(()=>Array.from(processedPhoto.getContext('2d').getImageData(0,0,1,1).data)),[20,140,220,255]);
+ assert.deepEqual(await page.evaluate(()=>allBoxes().slice(0,8)),state.boxes);
+ const preserved=await page.evaluate(()=>JSON.stringify(boxes));await page.locator('#image').focus();await page.keyboard.press('ArrowLeft');assert.equal(await page.evaluate(()=>JSON.stringify(boxes)),preserved);
+ state.preview_sequence=2;await page.waitForFunction(()=>processedSequence===2);
+ rawPreview=Buffer.from((await page.evaluate(()=>processedPhoto.toDataURL('image/jpeg'))).split(',')[1],'base64');state.preview_corrected=false;state.preview_sequence=3;await page.waitForFunction(()=>processedSequence===3&&!previewCorrected);assert.equal(await page.evaluate(()=>allBoxes().length),8);
+ if(process.env.UI_SCREENSHOTS)await page.screenshot({path:'/tmp/water-setup-processed.png',fullPage:true});
+ state.preview_available=false;await page.waitForFunction(()=>!processedReady);assert((await page.textContent('#view_info')).includes('Kein gültiges'));
+ await page.selectOption('#view','raw');assert.equal(await page.locator('#box_x').isEnabled(),true);
  state.busy=true;await page.waitForFunction(()=>document.getElementById('reset').disabled);assert.equal(await page.locator('#restart').isEnabled(),true);confirmReset=true;await page.click('#restart');await page.waitForTimeout(100);assert(posts.some(p=>p.url.pathname==='/meter/restart'));confirmReset=false;state.busy=false;await page.waitForFunction(()=>!document.getElementById('reset').disabled);
  await page.click('#reset');assert(!posts.some(p=>p.url.pathname==='/meter/reset'));confirmReset=true;
  await page.click('#reset');await page.waitForFunction(()=>boxes.every(b=>b.every(v=>v===0)));assert(posts.some(p=>p.url.pathname==='/meter/reset'));assert.equal(await page.inputValue('#baseline'),'');

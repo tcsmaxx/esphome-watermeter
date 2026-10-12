@@ -65,7 +65,14 @@ void AlignedMeterReader::on_camera_image(const std::shared_ptr<camera::CameraIma
 }
 std::shared_ptr<camera::CameraImage> MeterSetup::align_image_(const std::shared_ptr<camera::CameraImage> &image) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if(!busy_ || !active_alignment_.enabled) {alignment_result_="Ausgeschaltet";alignment_ms_=0;return image;}
+  preview_.reset();preview_size_=0;++preview_sequence_;
+  if(!busy_ || !active_alignment_.enabled) {
+    alignment_result_="Ausgeschaltet";alignment_ms_=0;
+    const auto size=image->get_data_length();
+    auto copy=ImageBuffer(static_cast<uint8_t *>(heap_caps_malloc(size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)),heap_caps_free);
+    if(copy){std::memcpy(copy.get(),image->get_data_buffer(),size);set_preview_(copy,size,false);}
+    return image;
+  }
   const uint32_t begin=millis();
   std::string error;
   auto rgb=decode_rgb(image->get_data_buffer(),image->get_data_length());
@@ -100,6 +107,7 @@ std::shared_ptr<camera::CameraImage> MeterSetup::align_image_(const std::shared_
   // The upstream RGB/JPEG autodetector only looks for the JPEG SOI prefix.
   // Raw RGB is known here; neutralize that accidental prefix at the far corner.
   if(corrected.get()[0]==0xff && corrected.get()[1]==0xd8) corrected.get()[0]=0xfe;
+  set_preview_(corrected,640*480*3,true);
   return std::make_shared<AlignedImage>(std::move(corrected),image);
 }
 bool MeterSetup::save_configuration_(const Settings &settings,const AlignmentReference &alignment,bool flush) {
@@ -212,6 +220,7 @@ void MeterSetup::on_camera_image(const std::shared_ptr<camera::CameraImage> &ima
   }
 }
 void MeterSetup::reset_() {
+  preview_.reset();preview_size_=0;++preview_sequence_;
   Settings cleared;
   if(!save_configuration_(cleared,AlignmentReference{},true)) {
     message_="Löschen fehlgeschlagen";
@@ -467,6 +476,9 @@ std::string MeterSetup::status_() {
   out+=",\"reference_revision\":";out+=std::to_string(reference_revision_);
   out+=",\"references\":[";
   for(int k=0;k<2;k++){if(k) out+=',';out+='[';for(int j=0;j<4;j++){if(j) out+=',';out+=std::to_string(draft_alignment_.regions[k][j]);}out+=']';}out+=']';
+  out+=",\"preview_available\":";out+=preview_?"true":"false";
+  out+=",\"preview_sequence\":";out+=std::to_string(preview_sequence_);
+  out+=",\"preview_corrected\":";out+=preview_rgb_?"true":"false";
   out+=",\"alignment_result\":";out+=quote(alignment_result_);
   out+=",\"alignment_ms\":";out+=std::to_string(alignment_ms_);
   out+=",\"reader_phase\":";out+=quote(reader_phase_());
@@ -502,6 +514,16 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     auto s=status_json_; guard.unlock();
     auto *response=r->beginResponse(200,"application/json",s);
     response->addHeader("Cache-Control","no-store"); r->send(response); return;
+  }
+  if(url=="/meter/processed" && r->method()==HTTP_GET) {
+    if(!preview_) {r->send(503,"text/plain; charset=utf-8","Kein gültiges KI-Bild; Rahmen testen und Ausrichtungsstatus prüfen");return;}
+    auto image=preview_;const auto size=preview_size_;const bool rgb=preview_rgb_;
+    const auto sequence=preview_sequence_;const auto boxes=preview_boxes_,references=preview_references_;
+    guard.unlock();
+    auto *response=r->beginResponse(200,rgb?"application/octet-stream":"image/jpeg",image.get(),size);
+    response->addHeader("Cache-Control","no-store");response->addHeader("X-Meter-Image",std::to_string(sequence).c_str());
+    response->addHeader("X-Meter-Boxes",boxes.c_str());response->addHeader("X-Meter-References",references.c_str());
+    r->send(response);return;
   }
   if(url=="/meter/snapshot" && r->method()==HTTP_GET) {
     if(!jpeg_) {r->send(503,"text/plain","Noch kein Bild");return;}
@@ -587,6 +609,15 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   // ESPHome 2026.9.1 maps unsupported HTTP codes (including 202) to 500.
   // The command is queued successfully; return a supported success status.
   r->send(200,"text/plain","Aktion vorgemerkt");
+}
+void MeterSetup::set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,bool rgb) {
+  preview_=data;preview_size_=size;preview_rgb_=rgb;
+  preview_boxes_=zones(test_?pending_:settings_);
+  preview_references_="[";
+  for(int k=0;k<2;k++) {if(k)preview_references_+=',';preview_references_+='[';
+    for(int j=0;j<4;j++){if(j)preview_references_+=',';preview_references_+=std::to_string(active_alignment_.regions[k][j]);}preview_references_+=']';
+  }
+  preview_references_+=']';
 }
 // Recovery keeps the worker isolated until a reboot; never reuse an unknown live job.
 std::string MeterSetup::reader_phase_() const {
