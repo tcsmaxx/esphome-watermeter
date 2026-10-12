@@ -5,6 +5,7 @@ root=Path(__file__).resolve().parent.parent
 header=(root/'components/meter_setup/meter_setup.h').read_text();cpp=(root/'components/meter_setup/meter_setup.cpp').read_text();features=(root/'components/meter_setup/features.cpp').read_text()
 structs=header[header.index('struct Settings {'):header.index('class MeterSetup;')]
 methods=features[features.index('void MeterSetup::capture_digit_log_('):features.rfind('\n}')]
+a=methods.index('void AlignedMeterReader::loop()');b=methods.index('void MeterSetup::features_loop_()',a);methods=methods[:a]+methods[b:]
 save_body=cpp[cpp.index('    if(cmd==SAVE) {')+len('    if(cmd==SAVE) {'):cpp.index('    } else {\n      reader_->set_crop_zones')]
 validation=cpp[cpp.index('int MeterSetup::invalid_box_('):cpp.index('static std::string zones(const Settings &s) {')]
 source=r'''
@@ -43,7 +44,9 @@ struct AppType{std::string get_name(){return "test";}std::string get_friendly_na
 std::string zones(const Settings&){return "saved zones";}
 struct Pref {bool fail_next=false;std::vector<uint8_t> data;template<class T>bool save(T*p){if(fail_next){fail_next=false;return false;}auto b=reinterpret_cast<uint8_t*>(p);data.assign(b,b+sizeof(T));return true;}};
 struct Globals{bool sync(){return true;}}globals;Globals *global_preferences=&globals;
-struct Sensor{float state=NAN;void publish_state(float v){state=v;}};
+struct Sensor{float state=NAN;bool has_state(){return !std::isnan(state);}void publish_state(float v){state=v;}};
+namespace sensor {using Sensor=::Sensor;}
+struct Text{std::string state;};
 struct Binary{bool state=false;void publish_state(bool v){state=v;}};
 struct Reader{std::string zones;void set_crop_zones(const std::string&s){zones=s;}};
 class MeterSetup {
@@ -53,7 +56,8 @@ public:
  std::string export_json_,pending_import_,message_,reading_error_,confidence_digits_,digits_;float digit_confidences_[8]{},reading_age_=NAN,confidence_=0;
  uint32_t pending_warning_after_=0,next_=0,health_updated_=0,last_accepted_at_=0,boot_started_=0,config_revision_=0,mqtt_image_sequence_=0,preview_sequence_=1;
  std::shared_ptr<uint8_t> preview_,inference_jpeg_;size_t preview_size_=0,inference_jpeg_size_=0;
- Sensor changes,flows;Sensor *change_=&changes,*flow_=&flows;
+ Sensor changes,flows,value,confidence;Sensor *change_=&changes,*flow_=&flows,*value_=&value,*confidence_sensor_=&confidence,*digit_sensors_[8]{};Text *last_update_=nullptr,*status_sensor_=nullptr,*error_sensor_=nullptr;
+ bool confidence_pending_=false;uint32_t confidence_finished_at_=0,mqtt_state_at_=0;uint8_t mqtt_discovery_index_=0;
  Sensor age;Sensor *age_sensor_=&age;Binary stale;Binary *stale_sensor_=&stale;Reader reader;Reader *reader_=&reader;
  Pref illumination_preference_,runtime_preference_;Configuration saved{};
  uint16_t led_capacity_()const{return 64;}bool save_configuration_(const Settings &s,const AlignmentReference&a,bool){saved.settings=s;saved.alignment=a;return true;}
@@ -62,6 +66,7 @@ public:
 '''+save_body+r'''
  }
  static int invalid_box_(const Settings&);static bool valid_(const Settings&);
+ void capture_digit_scores_(const std::string&,const float*);
  void capture_digit_log_(const char*,const char*,size_t);void features_loop_();void build_export_();void import_config_();void mqtt_loop_();
 };
 '''+validation+methods+r'''
@@ -81,9 +86,16 @@ int main(){
  restored.confidence_digits_.clear();const std::string malformed="Result: VALID (Raw: 01864266, Conf: 0.980, [0.992])";restored.capture_digit_log_("meter_reader_tflite",malformed.data(),malformed.size());assert(restored.confidence_digits_.empty());
  restored.runtime_.warning_after=30;restored.have_previous_reading_=true;restored.last_accepted_at_=5000;tick=35000;restored.features_loop_();assert(restored.stale_&&restored.stale.state&&restored.age.state==30);
  restored.last_accepted_at_=tick;tick+=5000;restored.features_loop_();assert(!restored.stale_&&restored.age.state==5);
- mqtt::client.messages.clear();restored.mqtt_discovered_=false;restored.busy_=false;restored.test_=false;restored.inference_jpeg_=std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,0,217},std::default_delete<uint8_t[]>());restored.inference_jpeg_size_=4;restored.mqtt_loop_();assert(mqtt::client.messages.size()==2);
- JsonDocument discovery;deserializeJson(discovery,mqtt::client.messages[0].payload);assert(discovery["device"]["identifiers"]=="112233aabbcc"&&discovery["topic"]=="test/camera/image"&&discovery["availability_topic"]=="test/status");assert(mqtt::client.messages[1].payload.size()==4&&mqtt::client.messages[1].payload[2]==0&&mqtt::client.messages[1].retain);
- restored.mqtt_loop_();assert(mqtt::client.messages.size()==2);restored.test_=true;++restored.preview_sequence_;restored.mqtt_loop_();assert(mqtt::client.messages.size()==2);restored.test_=false;mqtt::client.success=false;restored.mqtt_loop_();assert(restored.mqtt_image_sequence_==1);mqtt::client.success=true;restored.mqtt_loop_();assert(mqtt::client.messages.size()==3);
+ restored.busy_=false;restored.confidence_pending_=true;restored.confidence_finished_at_=tick;restored.digits_="01864266";Sensor digit;restored.digit_sensors_[4]=&digit;
+ restored.capture_digit_log_("meter_reader_tflite",log.data(),log.size());assert(!restored.confidence_pending_&&std::abs(digit.state-93.4f)<.01f);
+ restored.confidence_digits_.clear();restored.confidence_pending_=true;tick+=3001;restored.capture_digit_log_("meter_reader_tflite",log.data(),log.size());assert(restored.confidence_digits_.empty());
+ mqtt::client.messages.clear();restored.mqtt_discovered_=false;restored.mqtt_discovery_index_=0;restored.mqtt_state_at_=0;restored.busy_=false;restored.test_=false;restored.inference_jpeg_=std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,0,217},std::default_delete<uint8_t[]>());restored.inference_jpeg_size_=4;restored.mqtt_loop_();assert(mqtt::client.messages.size()==3);
+ JsonDocument discovery;deserializeJson(discovery,mqtt::client.messages[0].payload);assert(discovery["device"]["identifiers"]=="112233aabbcc"&&discovery["topic"]=="test/camera/image"&&discovery["availability_topic"]=="test/status");assert(mqtt::client.messages[2].payload.size()==4&&mqtt::client.messages[2].payload[2]==0&&mqtt::client.messages[2].retain);
+ for(int i=0;i<18;i++)restored.mqtt_loop_();assert(restored.mqtt_discovered_&&restored.mqtt_discovery_index_==19&&mqtt::client.messages.size()==21);
+ for(int i=3;i<21;i++){JsonDocument d;deserializeJson(d,mqtt::client.messages[i].payload);assert(d["state_topic"]=="test/meter/state"&&d["device"]["identifiers"]=="112233aabbcc");}
+ JsonDocument state;deserializeJson(state,mqtt::client.messages[1].payload);assert(state["confidence_5"].as<float>()>93&&state["value"].isNull());
+ restored.mqtt_loop_();assert(mqtt::client.messages.size()==21);restored.test_=true;++restored.preview_sequence_;restored.mqtt_loop_();assert(mqtt::client.messages.size()==21);restored.test_=false;mqtt::client.success=false;restored.mqtt_loop_();assert(restored.mqtt_image_sequence_==1);mqtt::client.success=true;restored.mqtt_loop_();assert(mqtt::client.messages.size()==22);
+ mqtt::client.connected=false;restored.mqtt_loop_();assert(restored.mqtt_discovery_index_==0&&!restored.mqtt_discovered_);mqtt::client.connected=true;restored.mqtt_loop_();assert(restored.mqtt_discovery_index_==1);
  std::cout<<"Features passed: backup/reference roundtrip, strict validation/rollback, per-digit matching, age warning/recovery, camera discovery/MAC, binary JPEG/retain/retry/test isolation\n";
 }
 '''

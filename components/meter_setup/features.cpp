@@ -31,9 +31,34 @@ void MeterSetup::capture_digit_log_(const char *tag,const char *message,size_t l
   for(int i=0;i<8;i++) {char *end=nullptr;float value=std::strtof(p,&end);if(end==p||!std::isfinite(value)||value<0||value>1)return;
     while(*end==' ')++end;if(*end!=(i==7?']':','))return;values[i]=value*100;p=end+1;
   }
+  capture_digit_scores_(digits,values);
+}
+void MeterSetup::capture_digit_scores_(const std::string &digits,const float *values) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if(!busy_||timed_out_)return;
+  if(timed_out_)return;
+  // Logger delivery may follow the deferred reading callback. Match that result
+  // for a bounded period, rather than discarding it because busy was cleared.
+  if(!busy_&&(!confidence_pending_||digits!=digits_||millis()-confidence_finished_at_>3000))return;
   confidence_digits_=digits;std::copy(values,values+8,digit_confidences_);
+  if(!busy_){for(int i=0;i<8;i++)if(digit_sensors_[i])digit_sensors_[i]->publish_state(values[i]);confidence_pending_=false;}
+}
+void AlignedMeterReader::loop() {
+#ifdef SUPPORT_DOUBLE_BUFFERING
+  // The main loop is the sole consumer. Read the result before the upstream
+  // reader removes and releases it, preserving the original inference scores.
+  InferenceResult *result=nullptr;
+  if(owner_&&output_queue_&&xQueuePeek(output_queue_,&result,0)==pdTRUE&&result&&result->readings.size()==8&&result->probabilities.size()==8) {
+    std::string digits;float values[8];bool valid=true;
+    for(int i=0;i<8;i++) {
+      const float reading=result->readings[i],score=result->probabilities[i];
+      if(!std::isfinite(reading)||reading<0||reading>=10||!std::isfinite(score)||score<0||score>1){valid=false;break;}
+      int digit=(reading-std::floor(reading)>=0.7f)?int(std::ceil(reading)):int(std::floor(reading));
+      digits+=char('0'+(digit>=10?0:digit));values[i]=score*100;
+    }
+    if(valid)owner_->capture_digit_scores_(digits,values);
+  }
+#endif
+  MeterReaderTFLite::loop();
 }
 void MeterSetup::features_loop_() {
   if(millis()-health_updated_>=5000) {
@@ -96,16 +121,61 @@ void MeterSetup::import_config_() {
 }
 void MeterSetup::mqtt_loop_() {
 #ifdef USE_MQTT
-  auto *client=mqtt::global_mqtt_client;if(!client||!client->is_connected()){mqtt_discovered_=false;return;}
+  auto *client=mqtt::global_mqtt_client;if(!client||!client->is_connected()){mqtt_discovered_=false;mqtt_discovery_index_=0;mqtt_state_at_=0;return;}
   const auto &discovery=client->get_discovery_info();const auto prefix=client->get_topic_prefix();
+  struct Field {const char *key,*name,*domain,*unit,*device_class,*state_class;};
+  static const Field fields[]={
+    {"value","Zählerstand","sensor","m³","water","total_increasing"},
+    {"change","Änderung zu Vorwert","sensor","m³","","measurement"},
+    {"flow","Durchfluss","sensor","m³/h","","measurement"},
+    {"last_update","Letzte Aktualisierung","sensor","","",""},
+    {"status","Ablesestatus","sensor","","",""},
+    {"error","Ablesefehler","sensor","","",""},
+    {"age","Alter der letzten Ablesung","sensor","s","duration","measurement"},
+    {"stale","Ablesung veraltet","binary_sensor","","problem",""},
+    {"confidence","Erkennungskonfidenz","sensor","%","","measurement"},
+    {"confidence_1","Konfidenz Stelle 1","sensor","%","","measurement"},
+    {"confidence_2","Konfidenz Stelle 2","sensor","%","","measurement"},
+    {"confidence_3","Konfidenz Stelle 3","sensor","%","","measurement"},
+    {"confidence_4","Konfidenz Stelle 4","sensor","%","","measurement"},
+    {"confidence_5","Konfidenz Stelle 5","sensor","%","","measurement"},
+    {"confidence_6","Konfidenz Stelle 6","sensor","%","","measurement"},
+    {"confidence_7","Konfidenz Stelle 7","sensor","%","","measurement"},
+    {"confidence_8","Konfidenz Stelle 8","sensor","%","","measurement"},
+    {"problem","Ableseproblem","binary_sensor","","problem",""}};
+  char mac_buffer[MAC_ADDRESS_BUFFER_SIZE];get_mac_address_into_buffer(mac_buffer);const std::string mac(mac_buffer);
+  // Publish one discovery record per loop; retry failures without filling the outbox.
   if(!mqtt_discovered_&&client->is_discovery_enabled()) {
-    const auto topic=discovery.prefix+"/camera/"+App.get_name()+"/kamerabild/config";
-    char mac_buffer[MAC_ADDRESS_BUFFER_SIZE];get_mac_address_into_buffer(mac_buffer);const std::string mac(mac_buffer);
-    const auto payload=json::build_json([&](JsonObject root){root["name"]="Kamerabild";root["unique_id"]=mac+"-watermeter-camera";root["topic"]=prefix+"/camera/image";
+    const bool camera=mqtt_discovery_index_==0;
+    const auto &field=fields[camera?0:mqtt_discovery_index_-1];
+    const std::string key=camera?"kamerabild":field.key;
+    const auto topic=discovery.prefix+"/"+(camera?"camera":field.domain)+"/"+App.get_name()+"/"+key+"/config";
+    const auto payload=json::build_json([&](JsonObject root){
+      root["name"]=camera?"Kamerabild":field.name;root["unique_id"]=mac+"-watermeter-"+(camera?"camera":key);
+      if(camera)root["topic"]=prefix+"/camera/image";
+      else {
+        root["state_topic"]=prefix+"/meter/state";
+        root["value_template"]="{{ value_json."+key+" if value_json."+key+" is not none else 'None' }}";
+        if(*field.unit)root["unit_of_measurement"]=field.unit;
+        if(*field.device_class)root["device_class"]=field.device_class;
+        if(*field.state_class)root["state_class"]=field.state_class;
+        if(std::strcmp(field.domain,"binary_sensor")==0){root["value_template"]="{{ 'ON' if value_json."+key+" else 'OFF' }}";root["payload_on"]="ON";root["payload_off"]="OFF";}
+        if(mqtt_discovery_index_>=7&&mqtt_discovery_index_<=17)root["entity_category"]="diagnostic";
+      }
       const auto &available=client->get_availability();if(!available.topic.empty()){root["availability_topic"]=available.topic;root["payload_available"]=available.payload_available;root["payload_not_available"]=available.payload_not_available;}
       auto device=root["device"].to<JsonObject>();device["identifiers"]=mac;device["name"]=App.get_friendly_name();device["manufacturer"]="ESPHome";device["model"]="XIAO ESP32-S3 Watermeter";
     });
-    mqtt_discovered_=client->publish(topic,std::string(payload),0,discovery.retain);
+    if(client->publish(topic,std::string(payload),0,discovery.retain)){++mqtt_discovery_index_;mqtt_discovered_=mqtt_discovery_index_==19;}
+  }
+  if(!mqtt_state_at_||millis()-mqtt_state_at_>=5000) {
+    const auto payload=json::build_json([&](JsonObject root){
+      const auto number=[&](const char *key,sensor::Sensor *entity){if(entity&&entity->has_state()&&std::isfinite(entity->state))root[key]=entity->state;else root[key]=nullptr;};
+      number("value",value_);number("change",change_);number("flow",flow_);number("age",age_sensor_);number("confidence",confidence_sensor_);
+      for(int i=0;i<8;i++)number(("confidence_"+std::to_string(i+1)).c_str(),digit_sensors_[i]);
+      root["last_update"]=last_update_?last_update_->state:"";root["status"]=status_sensor_?status_sensor_->state:"";root["error"]=error_sensor_?error_sensor_->state:"";
+      root["stale"]=stale_;root["problem"]=!settings_.calibrated||reading_problem_||timed_out_||stale_;
+    });
+    if(client->publish(prefix+"/meter/state",std::string(payload),0,true))mqtt_state_at_=millis()?millis():1;
   }
   if(!busy_&&!test_&&inference_jpeg_&&mqtt_image_sequence_!=preview_sequence_) {
     if(client->publish(prefix+"/camera/image",reinterpret_cast<const char*>(inference_jpeg_.get()),inference_jpeg_size_,0,true))mqtt_image_sequence_=preview_sequence_;

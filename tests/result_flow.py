@@ -54,7 +54,7 @@ class MeterSetup {
   uint32_t last_accepted_at_=0;
   bool have_previous_reading_=false,reading_problem_=false;
   RuntimeSettings runtime_{};bool stale_=false;struct RuntimePref {bool save(RuntimeSettings*){return true;}}runtime_preference_;
-  float digit_confidences_[8]{};std::string confidence_digits_;Value *confidence_sensor_=nullptr,*digit_sensors_[8]{};
+  bool confidence_pending_=false;uint32_t confidence_finished_at_=0;float digit_confidences_[8]{};std::string confidence_digits_;Value *confidence_sensor_=nullptr,*digit_sensors_[8]{};
   void build_export_(){}
   std::string reading_error_,last_reader_log_;
   RecoveryRecord recovery_{};struct RecoveryPref{bool save(RecoveryRecord*){return true;}} recovery_preference_;

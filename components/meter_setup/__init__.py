@@ -61,6 +61,10 @@ async def to_code(config):
     for entry in readers:
         if entry[CONF_ID].id == config['reader_id'].id:
             entry[CONF_ID].type = AlignedMeterReader
+    if "mqtt" in CORE.config:
+        for key, entity in config.items():
+            if isinstance(entity, dict):
+                entity.pop("mqtt_id", None)
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     for key, method in [('camera_id','set_camera'), ('reader_id','set_reader'), ('log_id','set_log'), ('web_server_base_id','set_server')]:

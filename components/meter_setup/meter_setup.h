@@ -78,6 +78,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   void set_stale(binary_sensor::BinarySensor *v){stale_sensor_=v;}
   void set_confidence(sensor::Sensor *v){confidence_sensor_=v;}
   void set_digit_confidence(int i,sensor::Sensor *v){digit_sensors_[i]=v;}
+  void capture_digit_scores_(const std::string &digits,const float *values);
   void capture_digit_log_(const char *tag,const char *message,size_t len);
   void set_problem(binary_sensor::BinarySensor *v) { problem_=v; }
   void setup() override;
@@ -110,7 +111,9 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   std::string confidence_digits_,export_json_,pending_import_;
   uint32_t pending_warning_after_{0},config_revision_{0},health_updated_{0},boot_started_{0},mqtt_image_sequence_{0};
   float reading_age_{NAN};
-  bool stale_{false},mqtt_discovered_{false};
+  bool stale_{false},mqtt_discovered_{false},confidence_pending_{false};
+  uint32_t confidence_finished_at_{0},mqtt_state_at_{0};
+  uint8_t mqtt_discovery_index_{0};
   std::shared_ptr<uint8_t> inference_jpeg_;
   size_t inference_jpeg_size_{0};
   void set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,bool rgb);
@@ -173,6 +176,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
 };
 class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {
  public:
+  void loop() override;
   void arm_for_capture() {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     pending_frame_.reset();frame_state_.store(FrameState::IDLE);

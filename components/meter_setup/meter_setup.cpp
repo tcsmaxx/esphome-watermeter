@@ -319,7 +319,7 @@ void MeterSetup::illumination_loop_() {
   }
 }
 void MeterSetup::start_(bool test) {
-  confidence_digits_.clear();for(auto &v:digit_confidences_)v=NAN;
+  confidence_pending_=false;confidence_digits_.clear();for(auto &v:digit_confidences_)v=NAN;
   active_alignment_=test?pending_alignment_:alignment_;
   busy_=true; test_=test; started_=millis(); accepted_=false;
   message_=test?"Test läuft …":"Ablesung läuft …";
@@ -404,6 +404,7 @@ void MeterSetup::result_(const std::string &s) {
   uint32_t raw=0;
   bool ok=parse_reading(s,digits_,confidence_,raw);
   if(timed_out_) { message_="Verspätetes Ergebnis verworfen; bitte neu starten"; return; }
+  confidence_finished_at_=millis();confidence_pending_=confidence_digits_!=digits_;
   if(confidence_sensor_)confidence_sensor_->publish_state(confidence_);
   for(int i=0;i<8;i++)if(digit_sensors_[i])digit_sensors_[i]->publish_state(confidence_digits_==digits_?digit_confidences_[i]:NAN);
   if(test_) message_=ok?"Test erkannt; noch nicht an Home Assistant übertragen":"Test unsicher; Rahmen/Beleuchtung prüfen";
