@@ -25,6 +25,10 @@ struct Configuration {
   Settings settings{};
   AlignmentReference alignment{};
 };
+struct RecoveryRecord {
+  uint32_t version{1}, automatic_restarts{0}, consecutive_timeouts{0}, frame{0}, free_heap{0}, free_psram{0}, uptime_ms{0};
+  char timestamp[24]{}, phase[32]{}, reason[160]{}, reader_log[160]{}, alignment[96]{};
+};
 struct LegacyIlluminationSettings {
   uint32_t version{1};
   uint16_t settle_ms{1000};
@@ -57,8 +61,8 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint16_t led_capacity_() const;
   bool accepts_reader_frame_();
   void set_camera(esp32_camera::ESP32Camera *v) { camera_ = v; }
-  void set_reader(meter_reader_tflite::MeterReaderTFLite *v) { reader_ = v; }
-  void set_log(text_sensor::TextSensor *v) { log_ = v; }
+  void set_reader(meter_reader_tflite::MeterReaderTFLite *v) { reader_ = v;if(log_)reader_->set_main_logs(log_); }
+  void set_log(text_sensor::TextSensor *v) { log_ = v;if(reader_)reader_->set_main_logs(log_); }
   void set_server(web_server_base::WebServerBase *v) { server_ = v; }
   void set_value(sensor::Sensor *v) { value_ = v; }
   void set_change(sensor::Sensor *v) { change_=v; }
@@ -84,6 +88,14 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   void start_(bool test);
   void reset_();
   void diagnostics_();
+  void record_fault_(const std::string &reason,bool automatic_restart);
+  void recovery_loop_();
+  std::string reader_phase_() const;
+  RecoveryRecord recovery_{};
+  ESPPreferenceObject recovery_preference_;
+  uint32_t reboot_at_{0}, recovery_delay_ms_{10000}, fault_saved_at_{0};
+  bool reboot_pending_{false};
+  std::string last_reader_log_;
   void result_(const std::string &s);
   std::string status_();
   static int invalid_box_(const Settings &s);
@@ -125,7 +137,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
   float confidence_{0};
   bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
-  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE } command_{NONE};
+  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART } command_{NONE};
   bool paused_{true};
 };
 class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {
@@ -133,6 +145,16 @@ class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {
   void arm_for_capture() {
     std::lock_guard<std::mutex> lock(frame_mutex_);
     pending_frame_.reset();frame_state_.store(FrameState::IDLE);
+  }
+  const char *phase() const {
+    switch(frame_state_.load()) {
+      case FrameState::IDLE:return "idle";
+      case FrameState::REQUESTED:return "waiting_frame";
+      case FrameState::AVAILABLE:return "frame_available";
+      case FrameState::PROCESSING:return "processing";
+      case FrameState::TIMEOUT:return "frame_timeout";
+    }
+    return "unknown";
   }
   void set_alignment_owner(MeterSetup *owner) {owner_=owner;}
   void on_camera_image(const std::shared_ptr<camera::CameraImage> &image) override;

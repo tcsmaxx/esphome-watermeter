@@ -2,6 +2,7 @@
 #include "web_ui.h"
 #include "reading_guard.h"
 #include "esphome/core/log.h"
+#include "esphome/core/application.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -179,7 +180,16 @@ void MeterSetup::setup() {
   log_->add_on_state_callback([this](const std::string &s){
     this->defer("meter_result", [this, s](){result_(s);});
   });
-  next_=millis()+10000;
+  recovery_preference_=global_preferences->make_preference<RecoveryRecord>(0x7a32b907);
+  RecoveryRecord previous_fault;
+  if(recovery_preference_.load(&previous_fault) && previous_fault.version==1) {
+    recovery_=previous_fault;
+    recovery_.timestamp[sizeof(recovery_.timestamp)-1]=0;recovery_.phase[sizeof(recovery_.phase)-1]=0;recovery_.reason[sizeof(recovery_.reason)-1]=0;
+    recovery_.reader_log[sizeof(recovery_.reader_log)-1]=0;recovery_.alignment[sizeof(recovery_.alignment)-1]=0;
+    if(recovery_.reason[0]) ESP_LOGW("meter_setup","Letzter Fehler: %s; Phase: %s; Reader: %s",recovery_.reason,recovery_.phase,recovery_.reader_log);
+    if(recovery_.consecutive_timeouts) recovery_delay_ms_=std::min<uint32_t>(1800000,60000U << std::min<uint32_t>(5,recovery_.consecutive_timeouts-1));
+  }
+  next_=millis()+recovery_delay_ms_;
   status_json_=status_();
   server_->add_handler(this);
   ESP_LOGI("meter_setup", "Loop task %s, configured stack %u bytes", pcTaskGetName(nullptr), ESPHOME_LOOP_TASK_STACK_SIZE);
@@ -305,6 +315,13 @@ void MeterSetup::start_(bool test) {
 void MeterSetup::loop() {
   std::lock_guard<std::mutex> guard(mutex_);
   Command cmd=command_; command_=NONE;
+  if(cmd==RESTART && !reboot_pending_) {
+    record_fault_("Manueller Neustart über Setup",false);
+    reboot_pending_=true;reboot_at_=millis()+1500;paused_=true;
+    set_illumination_(false,illumination_settings_);message_="Gerät wird neu gestartet …";
+  }
+  recovery_loop_();
+  if(reboot_pending_) {diagnostics_();if(millis()-status_updated_>=250){status_json_=status_();status_updated_=millis();}return;}
   if(cmd==RESET && !busy_) reset_();
   if(cmd==REFERENCE && !busy_) capture_references_();
   if(cmd==CAPTURE) {message_="Kamerabild wird aufgenommen …";begin_capture_(false);}
@@ -332,7 +349,9 @@ void MeterSetup::loop() {
     }
   }
   if(busy_ && !timed_out_ && millis()-started_>60000) {
-    timed_out_=true; paused_=true; reading_problem_=true; reading_error_="Zeitüberschreitung bei Ablesung"; message_="Zeitüberschreitung: Neustart erforderlich";
+    timed_out_=true; paused_=true; reading_problem_=true; reading_error_="Zeitüberschreitung bei Ablesung"; message_="Zeitüberschreitung: automatischer Neustart in 5 Sekunden";
+    record_fault_("Kein Ableseergebnis innerhalb von 60 Sekunden",true);
+    reboot_pending_=true;reboot_at_=millis()+5000;
     set_illumination_(false,illumination_settings_);
     reader_->set_pause_processing(true); // Keep busy latched: no ROI changes while a worker could still be alive.
   }
@@ -346,7 +365,20 @@ void MeterSetup::loop() {
 void MeterSetup::result_(const std::string &s) {
   // Reader publishes callbacks from its main loop, never the inference task.
   std::lock_guard<std::mutex> guard(mutex_);
-  if(!busy_ || s.rfind("Reading: ",0)!=0) return;
+  last_reader_log_=s.substr(0,159);
+  if(!busy_) return;
+  if(s.rfind("CRITICAL: Camera Frame Failure",0)==0 && !timed_out_) {
+    record_fault_(s,false);
+    reader_->set_pause_processing(true);
+    static_cast<AlignedMeterReader *>(reader_)->arm_for_capture();
+    busy_=false;inference_started_=false;accepted_=false;
+    set_illumination_(light_test_,pending_illumination_);
+    message_="Kamerabild ausgeblieben; erneuter Versuch geplant";
+    if(!test_) {reading_problem_=true;reading_error_=s;}
+    if(test_ && settings_.calibrated)reader_->set_crop_zones(zones(settings_));
+    next_=millis()+settings_.interval*1000;return;
+  }
+  if(s.rfind("Reading: ",0)!=0) return;
   reader_->set_pause_processing(true);inference_started_=false;
   set_illumination_(light_test_,pending_illumination_);
   uint32_t raw=0;
@@ -361,6 +393,9 @@ void MeterSetup::result_(const std::string &s) {
     reading_problem_=!ok;
     reading_error_=ok?"":message_;
     if(ok) {
+      if(recovery_.consecutive_timeouts) {
+        recovery_.consecutive_timeouts=0;recovery_preference_.save(&recovery_);global_preferences->sync();
+      }
       const float divisor=std::pow(10.0f,settings_.decimals);
       const float delta=(raw-settings_.baseline)/divisor;
       const uint32_t now=millis(), elapsed=now-last_accepted_at_;
@@ -434,6 +469,21 @@ std::string MeterSetup::status_() {
   for(int k=0;k<2;k++){if(k) out+=',';out+='[';for(int j=0;j<4;j++){if(j) out+=',';out+=std::to_string(draft_alignment_.regions[k][j]);}out+=']';}out+=']';
   out+=",\"alignment_result\":";out+=quote(alignment_result_);
   out+=",\"alignment_ms\":";out+=std::to_string(alignment_ms_);
+  out+=",\"reader_phase\":";out+=quote(reader_phase_());
+  out+=",\"last_reader_log\":";out+=quote(last_reader_log_);
+  out+=",\"reboot_pending\":";out+=reboot_pending_?"true":"false";
+  out+=",\"automatic_restarts\":";out+=std::to_string(recovery_.automatic_restarts);
+  out+=",\"consecutive_timeouts\":";out+=std::to_string(recovery_.consecutive_timeouts);
+  out+=",\"last_fault\":";out+=quote(recovery_.reason);
+  out+=",\"fault_timestamp\":";out+=quote(recovery_.timestamp);
+  out+=",\"fault_uptime_ms\":";out+=std::to_string(recovery_.uptime_ms);
+  out+=",\"fault_phase\":";out+=quote(recovery_.phase);
+  out+=",\"fault_reader_log\":";out+=quote(recovery_.reader_log);
+  out+=",\"fault_alignment\":";out+=quote(recovery_.alignment);
+  out+=",\"fault_frame\":";out+=std::to_string(recovery_.frame);
+  out+=",\"fault_free_heap\":";out+=std::to_string(recovery_.free_heap);
+  out+=",\"fault_free_psram\":";out+=std::to_string(recovery_.free_psram);
+  out+=",\"recovery_delay_ms\":";out+=std::to_string(recovery_delay_ms_);
   out+=",\"reset_count\":"; out+=std::to_string(reset_count_);
   out+=",\"http_task\":"; out+=quote(http_task_name_);
   out+='}'; return out;
@@ -461,6 +511,9 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   }
   if(r->method()!=HTTP_POST) {r->send(405,"text/plain","POST erforderlich");return;}
   if(!r->hasHeader("X-Meter-Setup")) {r->send(403,"text/plain","Einrichtungsseite verwenden");return;}
+  if(url=="/meter/restart") {
+    command_=RESTART;r->send(200,"text/plain; charset=utf-8","Neustart vorgemerkt");return;
+  }
   if(command_!=NONE || ((busy_ || capture_pending_) && url!="/meter/pause")) {r->send(409,"text/plain","Bitte laufende Aktion abwarten");return;}
   if(url=="/meter/light_on" || url=="/meter/light_off" || url=="/meter/light_save") {
     if(!illumination_) {r->send(400,"text/plain; charset=utf-8","LED-Konfiguration mit illumination_id in YAML fehlt");return;}
@@ -535,4 +588,34 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   // The command is queued successfully; return a supported success status.
   r->send(200,"text/plain","Aktion vorgemerkt");
 }
+// Recovery keeps the worker isolated until a reboot; never reuse an unknown live job.
+std::string MeterSetup::reader_phase_() const {
+  if(capture_pending_)return capture_stage_==0?"light_warmup":capture_stage_==1?"flush_frame":"snapshot";
+  const std::string phase=static_cast<AlignedMeterReader *>(reader_)->phase();
+  return inference_started_ && phase=="idle"?"awaiting_result":phase;
+}
+void MeterSetup::record_fault_(const std::string &reason,bool automatic_restart) {
+  const bool changed=reason!=recovery_.reason;
+  recovery_.frame=frame_;recovery_.uptime_ms=millis();
+  const auto now=std::time(nullptr);
+  if(now>1577836800) {auto *local=std::localtime(&now);if(local)std::strftime(recovery_.timestamp,sizeof(recovery_.timestamp),"%d.%m.%Y %H:%M:%S",local);}
+  else std::strncpy(recovery_.timestamp,"Zeit nicht synchronisiert",sizeof(recovery_.timestamp)-1);
+  recovery_.free_heap=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+  recovery_.free_psram=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  const auto copy=[](char *target,size_t size,const std::string &value){std::strncpy(target,value.c_str(),size-1);target[size-1]=0;};
+  copy(recovery_.phase,sizeof(recovery_.phase),reason.rfind("CRITICAL: Camera Frame Failure",0)==0?"camera_frame_timeout":reader_phase_());
+  copy(recovery_.reason,sizeof(recovery_.reason),reason);
+  copy(recovery_.reader_log,sizeof(recovery_.reader_log),last_reader_log_);
+  copy(recovery_.alignment,sizeof(recovery_.alignment),alignment_result_);
+  if(automatic_restart){++recovery_.automatic_restarts;++recovery_.consecutive_timeouts;}
+  if(automatic_restart || changed || millis()-fault_saved_at_>=900000) {
+    if(!recovery_preference_.save(&recovery_) || !global_preferences->sync()) ESP_LOGE("meter_setup","Fehlerdiagnose konnte nicht gespeichert werden");
+    save_configuration_(settings_,alignment_,true);fault_saved_at_=millis();
+  }
+  ESP_LOGW("meter_setup","Ablesefehler: %s; Phase %s; Heap %u; PSRAM %u; Reader %s",recovery_.reason,recovery_.phase,unsigned(recovery_.free_heap),unsigned(recovery_.free_psram),recovery_.reader_log);
+}
+void MeterSetup::recovery_loop_() {
+  if(reboot_pending_ && int32_t(millis()-reboot_at_)>=0) App.safe_reboot();
+}
+
 }

@@ -89,7 +89,7 @@ Abgewiesene Ablesungen verändern den bestätigten Zählerstand nicht. Status un
 
 Die Konfidenz ist der Mittelwert der Stellen, keine Garantie für jede einzelne Ziffer. Auch ein plausibler OCR-Fehler kann die Prüfungen passieren. Halb umgeschaltete Rollen, Reflexionen und unscharfe Ausschnitte erfordern besondere Aufmerksamkeit.
 
-Bei ausbleibendem Kamerabild wird die Aufnahme beendet und die automatische Beleuchtung ausgeschaltet. Liegt nach 60 Sekunden kein KI-Ergebnis vor, wird die Verarbeitung gesperrt und ein Neustart verlangt, damit kein weiterer Auftrag mit einer möglicherweise noch laufenden Inferenz überlappt.
+Bei ausbleibendem Kamerabild wird die Aufnahme beendet und die automatische Beleuchtung ausgeschaltet. Liegt nach 60 Sekunden kein KI-Ergebnis vor, wird der aktuelle Auftrag gesperrt. Die Fehlerdiagnose wird dauerhaft gespeichert, das Licht ausgeschaltet und nach fünf Sekunden ein kontrollierter automatischer Neustart ausgeführt. So wird kein weiterer Auftrag mit einer möglicherweise noch laufenden Inferenz überlappt. Nach wiederholten Zeitüberschreitungen verlängert sich die Wartezeit bis zur ersten Ablesung auf 1, 2, 4, 8, 16 und maximal 30 Minuten; eine erfolgreiche Ablesung setzt diese Staffelung zurück. Fehlende oder uneindeutige Referenzen verwerfen ausschließlich die betreffende Ablesung und lösen keinen Neustart aus. Ein vom Reader gemeldeter Kamera-Timeout wird abgeschlossen und im eingestellten Intervall erneut versucht.
 
 ## Optionale Referenzausrichtung
 
@@ -182,6 +182,23 @@ Die Beispielkonfiguration verwendet die Home-Assistant-Zeitquelle mit `Europe/Be
 
 [home-assistant-card.yaml](home-assistant-card.yaml) enthält eine Dashboard-Karte mit Verbrauchsdiagramm, Status, Kamerabild und Zählerstand. Erforderlich sind `stack-in-card`, `mini-graph-card` und `card-mod`. Die optionale Darstellung in Seven-Segment-Schrift setzt eine entsprechende Frontend-Schrift voraus. Die Entitäts-IDs der Beispielkarte müssen an die eigene Installation angepasst werden.
 
+## Fernwartung und automatische Erholung
+
+Die Setupseite bietet **Gerät neu starten**. Der Neustart ist nach Bestätigung auch während einer Ablesesperre möglich; Rahmen, Referenzen und Stand bleiben erhalten. Die Beispiel-YAML erzeugt zusätzlich einen ESPHome-Neustartknopf für Home Assistant:
+
+```yaml
+button:
+  - platform: restart
+    name: Neustart
+    entity_category: config
+```
+
+In einer eigenen YAML diesen Eintrag unter dem vorhandenen `button:`-Block ergänzen. Eine OTA-Installation startet das Gerät ebenfalls neu, sofern ESPHome-API und OTA erreichbar sind.
+
+Der letzte Kamera- oder Inferenzfehler bleibt in der Setup-Diagnose und unter `/meter/status` nachvollziehbar. Erfasst werden Ursache, Zeitpunkt, Betriebsdauer, Reader-Phase, letzte Reader-Meldung, Ausrichtungsergebnis, Bildnummer sowie freier interner Heap und PSRAM. Automatische Neustarts und aufeinanderfolgende Zeitüberschreitungen werden gezählt. Die Diagnose wird vor einem automatischen Neustart im Flash gespeichert und nach dem Start im Log ausgegeben. Erfolgreiche Messungen löschen den letzten gespeicherten Fehler nicht.
+
+Der automatische Neustart behandelt Fehler bei weiterhin laufendem Hauptloop. Bei komplett ausgefallenem Gerät, fehlender Versorgung oder nicht erreichbarem WLAN ist ein unabhängiger Fernschalter für die Stromversorgung nötig; OTA und Software-Neustart benötigen eine erreichbare Firmware.
+
 ## Architektur und Diagnose
 
 | Datei / Verzeichnis | Aufgabe |
@@ -230,6 +247,7 @@ python tests/alignment_flow.py
 python tests/persistence.py
 python tests/illumination_flow.py
 python tests/led_count_effect.py
+python tests/recovery_flow.py
 
 npm ci
 npx playwright install chromium --only-shell

@@ -28,6 +28,7 @@ class MeterSetup {
  std::string digits_="00123456",message_="Test \"ok\"",http_task_name_="httpd";
  float confidence_=73.4f;
  uint16_t led_capacity_() const{return 64;}
+ RecoveryRecord recovery_{};bool reboot_pending_=false;uint32_t recovery_delay_ms_=10000;std::string last_reader_log_;std::string reader_phase_()const{return "idle";}
  std::string status_();
 };
 '''+status+r'''

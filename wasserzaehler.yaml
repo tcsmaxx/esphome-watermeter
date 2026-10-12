@@ -29,6 +29,11 @@ api:
   encryption:
     key: !secret api_encryption_key
 
+button:
+  - platform: restart
+    name: Neustart
+    entity_category: config
+
 ota:
   - platform: esphome
     password: !secret ota_password

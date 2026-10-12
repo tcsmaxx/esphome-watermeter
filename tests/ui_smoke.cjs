@@ -55,6 +55,7 @@ const {chromium} = require('playwright');
  await page.locator('.sidebar').evaluate(el=>el.scrollTop=0);
  await page.click('.crop:nth-child(3)');assert.equal(await page.inputValue('#digit'),'2');
  if(process.env.UI_SCREENSHOTS){await page.screenshot({path:'/tmp/water-setup-desktop.png',fullPage:true});}
+ state.busy=true;await page.waitForFunction(()=>document.getElementById('reset').disabled);assert.equal(await page.locator('#restart').isEnabled(),true);confirmReset=true;await page.click('#restart');await page.waitForTimeout(100);assert(posts.some(p=>p.url.pathname==='/meter/restart'));confirmReset=false;state.busy=false;await page.waitForFunction(()=>!document.getElementById('reset').disabled);
  await page.click('#reset');assert(!posts.some(p=>p.url.pathname==='/meter/reset'));confirmReset=true;
  await page.click('#reset');await page.waitForFunction(()=>boxes.every(b=>b.every(v=>v===0)));assert(posts.some(p=>p.url.pathname==='/meter/reset'));assert.equal(await page.inputValue('#baseline'),'');
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

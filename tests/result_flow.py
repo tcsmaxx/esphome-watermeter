@@ -29,9 +29,11 @@ uint32_t millis() { return fake_now; }
 struct Reader {
   bool paused=false;
   std::vector<std::string> zone_updates;
+  int arms=0;void arm_for_capture(){++arms;}
   void set_pause_processing(bool p) { paused=p; }
   void set_crop_zones(const std::string &z) { zone_updates.push_back(z); }
 };
+using AlignedMeterReader=Reader;
 struct Value {
   std::vector<float> states;
   void publish_state(float v) { states.push_back(v); }
@@ -51,7 +53,9 @@ class MeterSetup {
   std::string diagnostic_status_,diagnostic_error_{"__initial__"};
   uint32_t last_accepted_at_=0;
   bool have_previous_reading_=false,reading_problem_=false;
-  std::string reading_error_;
+  std::string reading_error_,last_reader_log_;
+  RecoveryRecord recovery_{};struct RecoveryPref{bool save(RecoveryRecord*){return true;}} recovery_preference_;
+  void record_fault_(const std::string&,bool){}
   Preference preference_;
   Settings settings_{},pending_{}; AlignmentReference alignment_{},draft_alignment_{},pending_alignment_{},active_alignment_{};std::shared_ptr<unsigned char> reference_capture_;std::string alignment_result_;uint32_t alignment_ms_=0;
   std::mutex mutex_;
@@ -71,6 +75,11 @@ class MeterSetup {
 };
 '''+cpp[cpp.index('bool MeterSetup::save_configuration_('):cpp.index('bool MeterSetup::capture_references_()')]+zones+handler+reset+validation+r'''
 int main() {
+  MeterSetup camera_failure;camera_failure.test_=false;camera_failure.settings_.baseline=1864266;
+  camera_failure.result_("CRITICAL: Camera Frame Failure (Timeout 5000ms)");
+  assert(!camera_failure.busy_ && !camera_failure.inference_started_ && camera_failure.reader.paused);
+  assert(camera_failure.reader.arms==1 && camera_failure.reading_problem_ && !camera_failure.lamp);
+  assert(camera_failure.settings_.baseline==1864266 && camera_failure.value.states.empty());
   Settings overlap;
   for(int i=0;i<8;i++){auto &b=overlap.boxes[i];b[0]=20+i*40;b[1]=100;b[2]=b[0]+45;b[3]=160;}
   assert(MeterSetup::valid_(overlap)); // Adjacent crops overlap by 5 pixels.
