@@ -22,9 +22,12 @@ source=r'''
 #include <cassert>
 #include <iostream>
 #define USE_MQTT
+#define ESP_LOGW(...) ((void)0)
 constexpr int MAC_ADDRESS_BUFFER_SIZE=13;
 void get_mac_address_into_buffer(char *b){std::strcpy(b,"112233aabbcc");}
 uint32_t tick=0;uint32_t millis(){return tick;}
+struct TimestampJpeg{std::shared_ptr<uint8_t> data;size_t size=0;};
+int annotation_count=0;std::time_t annotated_capture=0;TimestampJpeg timestamp_jpeg(const uint8_t*,size_t,std::time_t captured){++annotation_count;annotated_capture=captured;return {};}
 namespace json {
 template<class F>std::string build_json(F f){JsonDocument doc;f(doc.to<JsonObject>());std::string out;serializeJson(doc,out);return out;}
 template<class F>bool parse_json(const std::string&s,F f){JsonDocument doc;if(deserializeJson(doc,s))return false;return f(doc.as<JsonObject>());}
@@ -55,7 +58,7 @@ public:
  std::mutex mutex_;bool busy_=true,timed_out_=false,test_=false,stale_=false,paused_=false,accepted_=false,reading_problem_=false,have_previous_reading_=false,light_test_=false,mqtt_discovered_=false;
  std::string export_json_,pending_import_,message_,reading_error_,confidence_digits_,digits_;float digit_confidences_[8]{},reading_age_=NAN,confidence_=0;
  uint32_t pending_warning_after_=0,next_=0,health_updated_=0,last_accepted_at_=0,boot_started_=0,config_revision_=0,mqtt_image_sequence_=0,preview_sequence_=1;
- std::shared_ptr<uint8_t> preview_,inference_jpeg_;size_t preview_size_=0,inference_jpeg_size_=0;
+ std::shared_ptr<uint8_t> preview_,inference_jpeg_;size_t preview_size_=0,inference_jpeg_size_=0;std::time_t inference_capture_epoch_=0;uint32_t timestamped_sequence_=0;
  Sensor changes,flows,value,confidence;Sensor *change_=&changes,*flow_=&flows,*value_=&value,*confidence_sensor_=&confidence,*digit_sensors_[8]{};Text *last_update_=nullptr,*status_sensor_=nullptr,*error_sensor_=nullptr;
  bool confidence_pending_=false;uint32_t confidence_finished_at_=0,mqtt_state_at_=0;uint8_t mqtt_discovery_index_=0;
  Sensor age;Sensor *age_sensor_=&age;Binary stale;Binary *stale_sensor_=&stale;Reader reader;Reader *reader_=&reader;
@@ -89,8 +92,8 @@ int main(){
  restored.busy_=false;restored.confidence_pending_=true;restored.confidence_finished_at_=tick;restored.digits_="01864266";Sensor digit;restored.digit_sensors_[4]=&digit;
  restored.capture_digit_log_("meter_reader_tflite",log.data(),log.size());assert(!restored.confidence_pending_&&std::abs(digit.state-93.4f)<.01f);
  restored.confidence_digits_.clear();restored.confidence_pending_=true;tick+=3001;restored.capture_digit_log_("meter_reader_tflite",log.data(),log.size());assert(restored.confidence_digits_.empty());
- mqtt::client.messages.clear();restored.mqtt_discovered_=false;restored.mqtt_discovery_index_=0;restored.mqtt_state_at_=0;restored.busy_=false;restored.test_=false;restored.inference_jpeg_=std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,0,217},std::default_delete<uint8_t[]>());restored.inference_jpeg_size_=4;restored.mqtt_loop_();assert(mqtt::client.messages.size()==3);
- JsonDocument discovery;deserializeJson(discovery,mqtt::client.messages[0].payload);assert(discovery["device"]["identifiers"]=="112233aabbcc"&&discovery["topic"]=="test/camera/image"&&discovery["availability_topic"]=="test/status");assert(mqtt::client.messages[2].payload.size()==4&&mqtt::client.messages[2].payload[2]==0&&mqtt::client.messages[2].retain);
+ mqtt::client.messages.clear();restored.mqtt_discovered_=false;restored.mqtt_discovery_index_=0;restored.mqtt_state_at_=0;restored.busy_=false;restored.test_=false;restored.inference_jpeg_=std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,0,217},std::default_delete<uint8_t[]>());restored.inference_jpeg_size_=4;restored.inference_capture_epoch_=1791805539;restored.mqtt_loop_();assert(mqtt::client.messages.size()==3);
+ assert(annotation_count==1&&annotated_capture==1791805539);JsonDocument discovery;deserializeJson(discovery,mqtt::client.messages[0].payload);assert(discovery["device"]["identifiers"]=="112233aabbcc"&&discovery["topic"]=="test/camera/image"&&discovery["availability_topic"]=="test/status");assert(mqtt::client.messages[2].payload.size()==4&&mqtt::client.messages[2].payload[2]==0&&mqtt::client.messages[2].retain);
  for(int i=0;i<18;i++)restored.mqtt_loop_();assert(restored.mqtt_discovered_&&restored.mqtt_discovery_index_==19&&mqtt::client.messages.size()==21);
  for(int i=3;i<21;i++){JsonDocument d;deserializeJson(d,mqtt::client.messages[i].payload);assert(d["state_topic"]=="test/meter/state"&&d["device"]["identifiers"]=="112233aabbcc");}
  JsonDocument state;deserializeJson(state,mqtt::client.messages[1].payload);assert(state["confidence_5"].as<float>()>93&&state["value"].isNull());

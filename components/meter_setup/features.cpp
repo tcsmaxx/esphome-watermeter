@@ -178,6 +178,12 @@ void MeterSetup::mqtt_loop_() {
     if(client->publish(prefix+"/meter/state",std::string(payload),0,true))mqtt_state_at_=millis()?millis():1;
   }
   if(!busy_&&!test_&&inference_jpeg_&&mqtt_image_sequence_!=preview_sequence_) {
+    if(timestamped_sequence_!=preview_sequence_){
+      auto annotated=timestamp_jpeg(inference_jpeg_.get(),inference_jpeg_size_,inference_capture_epoch_);
+      if(annotated.data){inference_jpeg_=std::move(annotated.data);inference_jpeg_size_=annotated.size;}
+      else ESP_LOGW("meter_setup","Zeitstempel im MQTT-Bild fehlgeschlagen; Rohbild übertragen");
+      timestamped_sequence_=preview_sequence_;
+    }
     if(client->publish(prefix+"/camera/image",reinterpret_cast<const char*>(inference_jpeg_.get()),inference_jpeg_size_,0,true))mqtt_image_sequence_=preview_sequence_;
   }
 #endif

@@ -2,6 +2,8 @@
 #include <mutex>
 #include <memory>
 #include <cmath>
+#include <ctime>
+#include "timestamp_camera.h"
 #include "alignment.h"
 #include "esphome/components/light/addressable_light_effect.h"
 #include "esp_heap_caps.h"
@@ -116,6 +118,8 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint8_t mqtt_discovery_index_{0};
   std::shared_ptr<uint8_t> inference_jpeg_;
   size_t inference_jpeg_size_{0};
+  std::time_t inference_capture_epoch_{0};
+  uint32_t timestamped_sequence_{0};
   void set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,bool rgb);
   std::shared_ptr<uint8_t> preview_;
   size_t preview_size_{0};

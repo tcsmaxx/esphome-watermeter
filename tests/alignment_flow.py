@@ -15,6 +15,7 @@ source=r'''
 #include <cstdlib>
 #include <iostream>
 #include <random>
+#include <ctime>
 #define MALLOC_CAP_SPIRAM 0
 #define MALLOC_CAP_8BIT 0
 #define ESP_LOGW(...)
@@ -45,7 +46,7 @@ class MeterSetup {
  Settings settings_{},pending_{};AlignmentReference active_alignment_{};AlignmentMatch alignment_matches_[2]{};
  std::string alignment_result_,message_,reading_error_;bool reading_problem_=false;
  meter_reader_tflite::MeterReaderTFLite *reader_{};
- std::shared_ptr<uint8_t> inference_jpeg_;size_t inference_jpeg_size_=0;
+ std::shared_ptr<uint8_t> inference_jpeg_;size_t inference_jpeg_size_=0;std::time_t inference_capture_epoch_=0;
  std::shared_ptr<uint8_t> preview_;size_t preview_size_=0;uint32_t preview_sequence_=0;bool preview_rgb_=false;
  void set_preview_(const std::shared_ptr<uint8_t>&v,size_t n,bool rgb){preview_=v;preview_size_=n;preview_rgb_=rgb;}
  bool accepts_reader_frame_(){return busy_;}
@@ -59,6 +60,7 @@ class AlignedMeterReader:public meter_reader_tflite::MeterReaderTFLite {
 std::string zones(const Settings&){return "saved crops";}
 using ImageBuffer=std::shared_ptr<uint8_t>;
 int decode_count=0;
+std::time_t camera_capture_epoch(const std::shared_ptr<camera::CameraImage>&){return 1791805539;}
 ImageBuffer decode_rgb(const uint8_t *data,size_t size){++decode_count;if(size!=640*480*3)return {};auto p=ImageBuffer(static_cast<uint8_t*>(malloc(size)),free);memcpy(p.get(),data,size);return p;}
 '''+processing+r'''
 class FakeImage:public camera::CameraImage {

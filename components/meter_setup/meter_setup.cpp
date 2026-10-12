@@ -67,6 +67,7 @@ std::shared_ptr<camera::CameraImage> MeterSetup::align_image_(const std::shared_
   std::lock_guard<std::mutex> lock(mutex_);
   preview_.reset();preview_size_=0;++preview_sequence_;
   inference_jpeg_.reset();inference_jpeg_size_=0;
+  inference_capture_epoch_=camera_capture_epoch(image);
   const auto original_size=image->get_data_length();
   auto original=ImageBuffer(static_cast<uint8_t*>(heap_caps_malloc(original_size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)),heap_caps_free);
   if(original){std::memcpy(original.get(),image->get_data_buffer(),original_size);inference_jpeg_=original;inference_jpeg_size_=original_size;}

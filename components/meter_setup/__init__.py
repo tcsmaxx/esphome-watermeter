@@ -1,5 +1,5 @@
 from pathlib import Path
-from esphome.core import CORE
+from esphome.core import CORE, ID
 from esphome.coroutine import CoroPriority, coroutine_with_priority
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -9,9 +9,11 @@ AUTO_LOAD = ['json', 'button', 'light', 'binary_sensor', 'text_sensor', 'sensor'
 DEPENDENCIES = ['esp32_camera', 'meter_reader_tflite', 'web_server']
 ns = cg.esphome_ns.namespace('meter_setup')
 MeterSetup = ns.class_('MeterSetup', cg.Component)
+TimestampCamera = ns.class_('TimestampCamera', cg.Component)
 AlignedMeterReader = ns.class_('AlignedMeterReader', meter_reader_tflite.MeterReaderTFLite)
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(MeterSetup),
+    cv.GenerateID("timestamp_camera_id"): cv.declare_id(TimestampCamera),
     cv.Required('camera_id'): cv.use_id(esp32_camera.ESP32Camera),
     cv.Required('reader_id'): cv.use_id(meter_reader_tflite.MeterReaderTFLite),
     cv.Required('log_id'): cv.use_id(text_sensor.TextSensor),
@@ -71,6 +73,12 @@ async def to_code(config):
         cg.add(getattr(var, method)(await cg.get_variable(config[key])))
     if 'illumination_id' in config:
         cg.add(var.set_illumination(await cg.get_variable(config['illumination_id'])))
+    physical_camera = await cg.get_variable(config['camera_id'])
+    if 'timestamp_camera_id' not in config:
+        config['timestamp_camera_id'] = ID(f"{config[CONF_ID].id}_timestamp_camera", is_declaration=True, type=TimestampCamera)
+        CORE.component_ids.add(config['timestamp_camera_id'].id)
+    public_camera = cg.Pvariable(config['timestamp_camera_id'], cg.RawExpression(f"meter_setup::TimestampCamera::install({physical_camera})"))
+    await cg.register_component(public_camera, {})
     reader = await cg.get_variable(config['reader_id'])
     cg.add(reader.set_alignment_owner(var))
     cg.add(var.set_value(await sensor.new_sensor(config['value'])))
