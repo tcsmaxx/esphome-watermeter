@@ -66,11 +66,13 @@ void AlignedMeterReader::on_camera_image(const std::shared_ptr<camera::CameraIma
 std::shared_ptr<camera::CameraImage> MeterSetup::align_image_(const std::shared_ptr<camera::CameraImage> &image) {
   std::lock_guard<std::mutex> lock(mutex_);
   preview_.reset();preview_size_=0;++preview_sequence_;
+  inference_jpeg_.reset();inference_jpeg_size_=0;
+  const auto original_size=image->get_data_length();
+  auto original=ImageBuffer(static_cast<uint8_t*>(heap_caps_malloc(original_size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)),heap_caps_free);
+  if(original){std::memcpy(original.get(),image->get_data_buffer(),original_size);inference_jpeg_=original;inference_jpeg_size_=original_size;}
   if(!busy_ || !active_alignment_.enabled) {
     alignment_result_="Ausgeschaltet";alignment_ms_=0;
-    const auto size=image->get_data_length();
-    auto copy=ImageBuffer(static_cast<uint8_t *>(heap_caps_malloc(size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)),heap_caps_free);
-    if(copy){std::memcpy(copy.get(),image->get_data_buffer(),size);set_preview_(copy,size,false);}
+    if(inference_jpeg_)set_preview_(inference_jpeg_,inference_jpeg_size_,false);
     return image;
   }
   const uint32_t begin=millis();
@@ -199,6 +201,7 @@ void MeterSetup::setup() {
   }
   next_=millis()+recovery_delay_ms_;
   status_json_=status_();
+  features_setup_();
   server_->add_handler(this);
   ESP_LOGI("meter_setup", "Loop task %s, configured stack %u bytes", pcTaskGetName(nullptr), ESPHOME_LOOP_TASK_STACK_SIZE);
 }
@@ -316,6 +319,7 @@ void MeterSetup::illumination_loop_() {
   }
 }
 void MeterSetup::start_(bool test) {
+  confidence_digits_.clear();for(auto &v:digit_confidences_)v=NAN;
   active_alignment_=test?pending_alignment_:alignment_;
   busy_=true; test_=test; started_=millis(); accepted_=false;
   message_=test?"Test läuft …":"Ablesung läuft …";
@@ -331,11 +335,12 @@ void MeterSetup::loop() {
   }
   recovery_loop_();
   if(reboot_pending_) {diagnostics_();if(millis()-status_updated_>=250){status_json_=status_();status_updated_=millis();}return;}
-  if(cmd==RESET && !busy_) reset_();
+  if(cmd==IMPORT && !busy_)import_config_();
+  if(cmd==RESET && !busy_) {reset_();runtime_.last_valid_epoch=0;runtime_.warning_after=300;runtime_preference_.save(&runtime_);global_preferences->sync();build_export_();}
   if(cmd==REFERENCE && !busy_) capture_references_();
   if(cmd==CAPTURE) {message_="Kamerabild wird aufgenommen …";begin_capture_(false);}
   if(cmd==LIGHT_SAVE) {
-    if(save_illumination_(pending_illumination_)) {message_="Beleuchtung gespeichert";if(light_test_)set_illumination_(true,illumination_settings_);}
+    if(save_illumination_(pending_illumination_)) {message_="Beleuchtung gespeichert";build_export_();if(light_test_)set_illumination_(true,illumination_settings_);}
     else message_="Beleuchtung konnte nicht gespeichert werden";
   }
   if(cmd==LIGHT_ON) {light_test_=true;light_test_deadline_=millis()+120000;set_illumination_(true,pending_illumination_);message_="Lichttest eingeschaltet (maximal 2 Minuten)";}
@@ -345,14 +350,19 @@ void MeterSetup::loop() {
   if(cmd==RESUME && settings_.calibrated) { paused_=false; next_=millis(); }
   if((cmd==SAVE || cmd==TEST) && !busy_) {
     if(cmd==SAVE) {
+      const auto previous_runtime=runtime_;
       pending_.calibrated=1;
       if(!save_configuration_(pending_,pending_alignment_,true)) {
         message_="Speichern fehlgeschlagen";paused_=true;return;
       }
-      settings_=pending_;alignment_=draft_alignment_=pending_alignment_; have_previous_reading_=false;
+      if(pending_warning_after_)runtime_.warning_after=pending_warning_after_;
+      settings_=pending_;alignment_=draft_alignment_=pending_alignment_; have_previous_reading_=false;runtime_.last_valid_epoch=0;
+      const bool runtime_saved=runtime_preference_.save(&runtime_)&&global_preferences->sync();
+      if(!runtime_saved){runtime_=previous_runtime;runtime_preference_.save(&runtime_);global_preferences->sync();}
+      build_export_();
       if(change_) change_->publish_state(NAN);
       if(flow_) flow_->publish_state(NAN);
-      reader_->set_crop_zones(zones(settings_)); paused_=false; next_=millis()+1000; message_="Gespeichert";
+      reader_->set_crop_zones(zones(settings_)); paused_=false; next_=millis()+1000; message_=runtime_saved?"Gespeichert":"Zähler gespeichert; Warnschwelle konnte nicht gespeichert werden";
     } else {
       reader_->set_crop_zones(zones(pending_)); start_(true);
     }
@@ -365,6 +375,7 @@ void MeterSetup::loop() {
     reader_->set_pause_processing(true); // Keep busy latched: no ROI changes while a worker could still be alive.
   }
   if(!busy_ && !capture_pending_ && !light_test_ && !paused_ && settings_.calibrated && int32_t(millis()-next_)>=0) start_(false);
+  features_loop_();
   diagnostics_();
   if(millis()-status_updated_>=250) {
     status_json_=status_();
@@ -393,6 +404,8 @@ void MeterSetup::result_(const std::string &s) {
   uint32_t raw=0;
   bool ok=parse_reading(s,digits_,confidence_,raw);
   if(timed_out_) { message_="Verspätetes Ergebnis verworfen; bitte neu starten"; return; }
+  if(confidence_sensor_)confidence_sensor_->publish_state(confidence_);
+  for(int i=0;i<8;i++)if(digit_sensors_[i])digit_sensors_[i]->publish_state(confidence_digits_==digits_?digit_confidences_[i]:NAN);
   if(test_) message_=ok?"Test erkannt; noch nicht an Home Assistant übertragen":"Test unsicher; Rahmen/Beleuchtung prüfen";
   else {
     if(!ok) message_="Abgewiesen: KI-Erkennung unsicher oder ungültig";
@@ -402,6 +415,7 @@ void MeterSetup::result_(const std::string &s) {
     reading_problem_=!ok;
     reading_error_=ok?"":message_;
     if(ok) {
+      const auto epoch=std::time(nullptr);runtime_.last_valid_epoch=epoch>1577836800?uint32_t(epoch):0;runtime_preference_.save(&runtime_);
       if(recovery_.consecutive_timeouts) {
         recovery_.consecutive_timeouts=0;recovery_preference_.save(&recovery_);global_preferences->sync();
       }
@@ -419,7 +433,7 @@ void MeterSetup::result_(const std::string &s) {
           last_update_->publish_state(stamp);
         } else last_update_->publish_state("Zeit nicht synchronisiert");
       }
-      settings_.baseline=raw; save_configuration_(settings_,alignment_,false);
+      settings_.baseline=raw; save_configuration_(settings_,alignment_,false);build_export_();
       value_->publish_state(raw/std::pow(10.0f,settings_.decimals));
       message_="Zählerstand übernommen";
     }
@@ -431,9 +445,9 @@ void MeterSetup::result_(const std::string &s) {
   next_=millis()+settings_.interval*1000;
 }
 void MeterSetup::diagnostics_() {
-  const bool problem=!settings_.calibrated || reading_problem_ || timed_out_;
-  const std::string status=timed_out_?"Zeitüberschreitung":busy_?(test_?"Test läuft":"Ablesung läuft"):capture_pending_?"Kamerabild aufnehmen":light_test_?"Lichttest":!settings_.calibrated?"Nicht eingerichtet":paused_?"Pausiert":reading_problem_?"Ablesung abgewiesen":have_previous_reading_?"OK":"Warte auf erste Ablesung";
-  const std::string error=!settings_.calibrated?"Zählerkonfiguration fehlt":reading_error_;
+  const bool problem=!settings_.calibrated || reading_problem_ || timed_out_ || stale_;
+  const std::string status=stale_&&!busy_?"Keine aktuelle Ablesung":timed_out_?"Zeitüberschreitung":busy_?(test_?"Test läuft":"Ablesung läuft"):capture_pending_?"Kamerabild aufnehmen":light_test_?"Lichttest":!settings_.calibrated?"Nicht eingerichtet":paused_?"Pausiert":reading_problem_?"Ablesung abgewiesen":have_previous_reading_?"OK":"Warte auf erste Ablesung";
+  const std::string error=stale_&&reading_error_.empty()?"Warnschwelle ohne gültige Ablesung überschritten":!settings_.calibrated?"Zählerkonfiguration fehlt":reading_error_;
   if(status_sensor_ && status!=diagnostic_status_) {status_sensor_->publish_state(status);diagnostic_status_=status;}
   if(error_sensor_ && error!=diagnostic_error_) {error_sensor_->publish_state(error.empty()?"Kein Fehler":error);diagnostic_error_=error;}
   if(problem_) problem_->publish_state(problem);
@@ -449,6 +463,12 @@ std::string MeterSetup::status_() {
   std::string out;
   out.reserve(640);
   out="{\"boxes\":"; out+=zones(settings_);
+  out+=",\"warning_after\":";out+=std::to_string(runtime_.warning_after);
+  out+=",\"reading_age\":";out+=std::isfinite(reading_age_)?std::to_string(uint32_t(reading_age_)):"null";
+  out+=",\"stale\":";out+=stale_?"true":"false";
+  out+=",\"config_revision\":";out+=std::to_string(config_revision_);
+  out+=",\"digit_confidences\":[";
+  for(int i=0;i<8;i++){if(i)out+=',';out+=confidence_digits_==digits_&&std::isfinite(digit_confidences_[i])?std::to_string(int(digit_confidences_[i]*10+0.5f)/10.0f):"null";}out+=']';
   out+=",\"decimals\":"; out+=std::to_string(settings_.decimals);
   out+=",\"interval\":"; out+=std::to_string(settings_.interval);
   out+=",\"baseline\":"; out+=std::to_string(settings_.baseline);
@@ -505,6 +525,10 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   std::string url(r->url_to(url_buf).c_str());
   if(url=="/setup" && r->method()==HTTP_GET) { r->send(200,"text/html; charset=utf-8",WEB_UI); return; }
   std::unique_lock<std::mutex> guard(mutex_);
+  if(url=="/meter/export" && r->method()==HTTP_GET) {
+    auto data=export_json_;guard.unlock();auto *response=r->beginResponse(200,"application/json",data);
+    response->addHeader("Content-Disposition","attachment; filename=wasserzaehler-backup.json");response->addHeader("Cache-Control","no-store");r->send(response);return;
+  }
   if(url=="/meter/status" && r->method()==HTTP_GET) {
     http_stack_free_=uxTaskGetStackHighWaterMark(nullptr);
     if(http_task_name_.empty()) {
@@ -537,6 +561,10 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     command_=RESTART;r->send(200,"text/plain; charset=utf-8","Neustart vorgemerkt");return;
   }
   if(command_!=NONE || ((busy_ || capture_pending_) && url!="/meter/pause")) {r->send(409,"text/plain","Bitte laufende Aktion abwarten");return;}
+  if(url=="/meter/import") {
+    if(!r->hasParam("data") || r->getParam("data")->value().size()>4096) {r->send(400,"text/plain","Sicherung fehlt oder zu groß");return;}
+    pending_import_=r->getParam("data")->value();command_=IMPORT;r->send(200,"text/plain","Import wird geprüft");return;
+  }
   if(url=="/meter/light_on" || url=="/meter/light_off" || url=="/meter/light_save") {
     if(!illumination_) {r->send(400,"text/plain; charset=utf-8","LED-Konfiguration mit illumination_id in YAML fehlt");return;}
     IlluminationSettings candidate=illumination_settings_;
@@ -556,6 +584,11 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     r->send(200,"text/plain","Aktion vorgemerkt");return;
   }
   if(url=="/meter/reference" || url=="/meter/test" || url=="/meter/save") {
+    pending_warning_after_=runtime_.warning_after;
+    if(r->hasParam("warning_after")) {
+      const std::string v=r->getParam("warning_after")->value();char *end=nullptr;const auto n=std::strtoul(v.c_str(),&end,10);
+      if(v.empty()||*end||n<30||n>86400){r->send(400,"text/plain","Warnschwelle: 30–86400 Sekunden");return;}pending_warning_after_=n;
+    }
     pending_alignment_=draft_alignment_;
     if(r->hasParam("alignment")) pending_alignment_.enabled=r->getParam("alignment")->value()=="1";
     if(r->hasParam("references")) {

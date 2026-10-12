@@ -1,6 +1,7 @@
 #pragma once
 #include <mutex>
 #include <memory>
+#include <cmath>
 #include "alignment.h"
 #include "esphome/components/light/addressable_light_effect.h"
 #include "esp_heap_caps.h"
@@ -24,6 +25,9 @@ struct Configuration {
   uint32_t version{1};
   Settings settings{};
   AlignmentReference alignment{};
+};
+struct RuntimeSettings {
+  uint32_t version{1}, warning_after{300}, last_valid_epoch{0};
 };
 struct RecoveryRecord {
   uint32_t version{1}, automatic_restarts{0}, consecutive_timeouts{0}, frame{0}, free_heap{0}, free_psram{0}, uptime_ms{0};
@@ -70,6 +74,11 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   void set_last_update(text_sensor::TextSensor *v) { last_update_=v; }
   void set_status(text_sensor::TextSensor *v) { status_sensor_=v; }
   void set_error(text_sensor::TextSensor *v) { error_sensor_=v; }
+  void set_reading_age(sensor::Sensor *v){age_sensor_=v;}
+  void set_stale(binary_sensor::BinarySensor *v){stale_sensor_=v;}
+  void set_confidence(sensor::Sensor *v){confidence_sensor_=v;}
+  void set_digit_confidence(int i,sensor::Sensor *v){digit_sensors_[i]=v;}
+  void capture_digit_log_(const char *tag,const char *message,size_t len);
   void set_problem(binary_sensor::BinarySensor *v) { problem_=v; }
   void setup() override;
   void loop() override;
@@ -88,6 +97,22 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   void start_(bool test);
   void reset_();
   void diagnostics_();
+  void features_setup_();
+  void features_loop_();
+  void build_export_();
+  void import_config_();
+  void mqtt_loop_();
+  RuntimeSettings runtime_{};
+  ESPPreferenceObject runtime_preference_;
+  sensor::Sensor *age_sensor_{},*confidence_sensor_{},*digit_sensors_[8]{};
+  binary_sensor::BinarySensor *stale_sensor_{};
+  float digit_confidences_[8]{};
+  std::string confidence_digits_,export_json_,pending_import_;
+  uint32_t pending_warning_after_{0},config_revision_{0},health_updated_{0},boot_started_{0},mqtt_image_sequence_{0};
+  float reading_age_{NAN};
+  bool stale_{false},mqtt_discovered_{false};
+  std::shared_ptr<uint8_t> inference_jpeg_;
+  size_t inference_jpeg_size_{0};
   void set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,bool rgb);
   std::shared_ptr<uint8_t> preview_;
   size_t preview_size_{0};
@@ -143,7 +168,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
   float confidence_{0};
   bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
-  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART } command_{NONE};
+  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT } command_{NONE};
   bool paused_{true};
 };
 class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {

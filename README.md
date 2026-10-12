@@ -68,9 +68,21 @@ Koordinaten beziehen sich stets auf das 640 × 480 große Kamerabild und sind un
 
 ### Speicherung und Zurücksetzen
 
-Ziffernrahmen, Nachkommastellen, Intervall, Sprunggrenze, Referenzen und letzter akzeptierter Rohwert werden auf dem Gerät gespeichert. Beim Speichern der Konfiguration erfolgt die Sicherung sofort. Während des Messbetriebs wird der aktuelle Stand spätestens nach fünf Minuten gesichert; bei Stromausfall können entsprechend die letzten Minuten fehlen. Nach einem Neustart wird der nächste erfolgreich erkannte Stand veröffentlicht.
+Ziffernrahmen, Nachkommastellen, Ableseintervall, Sprunggrenze, Warnschwelle, Referenzen und letzter akzeptierter Rohwert werden auf dem Gerät gespeichert. Beim Speichern der Konfiguration erfolgt die Sicherung sofort. Während des Messbetriebs wird der aktuelle Stand spätestens nach fünf Minuten gesichert; bei Stromausfall können entsprechend die letzten Minuten fehlen. Nach einem Neustart wird der nächste erfolgreich erkannte Stand veröffentlicht.
 
 **Zählerkonfiguration löschen** entfernt nach Bestätigung die Rahmen, Referenzen, Beleuchtungseinstellungen, den gespeicherten Stand und die Ableseeinstellungen. Die Automatik wird pausiert. WLAN, API, OTA und vorhandene Home-Assistant-Verlaufdaten bleiben erhalten. Während einer laufenden Ablesung ist das Zurücksetzen gesperrt.
+
+### Konfiguration exportieren und importieren
+
+**Exportieren** lädt eine JSON-Sicherung der gespeicherten Konfiguration herunter: alle Ziffernrahmen, Stand, Nachkommastellen, Ableseintervall, Sprunggrenze, Warnschwelle, Referenzpositionen und vollständige Referenzmuster sowie Beleuchtungseinstellungen. Ungespeicherte Änderungen im Browser gehören nicht zur Sicherung. WLAN-, API-, Web-, OTA- und MQTT-Zugangsdaten werden nicht exportiert; Hardwarepins und Kameraorientierung bleiben in YAML.
+
+**Importieren** übernimmt eine solche JSON-Datei nach Bestätigung. Format, Version, Bildgröße, Zahlenbereiche, Rahmenfolge, Referenzmuster und LED-Kapazität werden geprüft. Ungültige Dateien verändern die Konfiguration nicht. Nach erfolgreicher Speicherung bleibt die Automatik pausiert: Kamerabild und Rahmen testen, tatsächlichen Stand prüfen und anschließend **Fortsetzen** oder mit korrigiertem Stand speichern. Eine andere Kameramontage kann trotz gültiger Sicherung neue Referenzen und Rahmen erfordern.
+
+### Alter der letzten gültigen Ablesung
+
+**Warnung nach · Sekunden** legt fest, wann eine fehlende aktuelle Ablesung gemeldet wird (Standard 300 Sekunden, Bereich 30–86400 Sekunden). Eine Warnschwelle größer als das Ableseintervall wählen. Der Sensor **Alter der letzten Ablesung** zeigt die vergangenen Sekunden seit einer akzeptierten automatischen Ablesung, **Ablesung veraltet** meldet eine Überschreitung. Auch der allgemeine Problemstatus berücksichtigt diese Warnung.
+
+Tests und abgewiesene Ergebnisse setzen den Zeitpunkt nicht zurück. Nach Neustart kann der gespeicherte Zeitpunkt mit synchronisierter Systemzeit ausgewertet werden. Vor der ersten gültigen Ablesung ist das Alter unbekannt; die Warnung erfolgt nach Ablauf der Schwelle seit Start beziehungsweise manueller Neukalibrierung. Wie der Zählerstand wird der Zeitpunkt im laufenden Betrieb über ESPHome-Präferenzen gesichert. Das Setup zeigt den Zustand unter **Sicherung & Diagnose**.
 
 ## Schutz vor fehlerhaften Messwerten
 
@@ -87,7 +99,7 @@ Die Plausibilitätsprüfung und die Speicherung verwenden Ganzzahl-Rohwerte. Fü
 
 Abgewiesene Ablesungen verändern den bestätigten Zählerstand nicht. Status und Fehlersensor geben den Ablehnungsgrund an. Nach längeren Unterbrechungen, einem Zählerwechsel oder einem tatsächlich größeren Verbrauch muss der aktuelle Stand gegebenenfalls manuell eingetragen werden.
 
-Die Konfidenz ist der Mittelwert der Stellen, keine Garantie für jede einzelne Ziffer. Auch ein plausibler OCR-Fehler kann die Prüfungen passieren. Halb umgeschaltete Rollen, Reflexionen und unscharfe Ausschnitte erfordern besondere Aufmerksamkeit.
+Die Gesamtkonfidenz ist der Mittelwert der Stellen, keine Garantie für jede einzelne Ziffer. Zusätzlich werden acht Einzelkonfidenzen unter den Ziffernausschnitten und als Diagnose-Sensoren angezeigt. Werte unter 90 % werden im Setup hervorgehoben; dies ist ein Hinweis und keine zusätzliche Ablehnungsgrenze. Die Einzelwerte stammen aus der Ergebnislogzeile der festgelegten KI-Basis. Dafür muss das Logger-Level für `meter_reader_tflite` mindestens `INFO` sein. Fehlende oder nicht zum Ergebnis passende Einzelwerte werden als unbekannt angezeigt. Auch ein plausibler OCR-Fehler kann die Prüfungen passieren. Halb umgeschaltete Rollen, Reflexionen und unscharfe Ausschnitte erfordern besondere Aufmerksamkeit.
 
 Bei ausbleibendem Kamerabild wird die Aufnahme beendet und die automatische Beleuchtung ausgeschaltet. Liegt nach 60 Sekunden kein KI-Ergebnis vor, wird der aktuelle Auftrag gesperrt. Die Fehlerdiagnose wird dauerhaft gespeichert, das Licht ausgeschaltet und nach fünf Sekunden ein kontrollierter automatischer Neustart ausgeführt. So wird kein weiterer Auftrag mit einer möglicherweise noch laufenden Inferenz überlappt. Nach wiederholten Zeitüberschreitungen verlängert sich die Wartezeit bis zur ersten Ablesung auf 1, 2, 4, 8, 16 und maximal 30 Minuten; eine erfolgreiche Ablesung setzt diese Staffelung zurück. Fehlende oder uneindeutige Referenzen verwerfen ausschließlich die betreffende Ablesung und lösen keinen Neustart aus. Ein vom Reader gemeldeter Kamera-Timeout wird abgeschlossen und im eingestellten Intervall erneut versucht.
 
@@ -179,6 +191,10 @@ Der bestätigte **Zählerstand** wird in m³ mit Geräteklasse `water` und Zusta
 | Ablesefehler | Fehler- oder Ablehnungsgrund |
 | Ableseproblem | Binärer Problemstatus |
 | Ablesedauer | Dauer einer Ablesung in Millisekunden |
+| Alter der letzten Ablesung | Sekunden seit letzter akzeptierter Ablesung |
+| Ablesung veraltet | Warnschwelle ohne neue gültige Ablesung überschritten |
+| Erkennungskonfidenz | Mittlere Konfidenz des letzten Erkennungsergebnisses |
+| Konfidenz Stelle 1–8 | Einzelkonfidenzen des letzten Erkennungsergebnisses |
 
 Änderung und Durchfluss basieren ausschließlich auf akzeptierten automatischen Ablesungen. Der erste Durchfluss nach Start oder manueller Kalibrierung bleibt unbekannt, bis zwei akzeptierte Ablesungen vorliegen. Gleichbleibender Stand ergibt anschließend einen Durchfluss von null. Tests verändern keine Verbrauchswerte.
 
@@ -203,6 +219,30 @@ Der letzte Kamera- oder Inferenzfehler bleibt in der Setup-Diagnose und unter `/
 
 Der automatische Neustart behandelt Fehler bei weiterhin laufendem Hauptloop. Bei komplett ausgefallenem Gerät, fehlender Versorgung oder nicht erreichbarem WLAN ist ein unabhängiger Fernschalter für die Stromversorgung nötig; OTA und Software-Neustart benötigen eine erreichbare Firmware.
 
+## MQTT und zweite Home-Assistant-Instanz
+
+MQTT ist optional und kann parallel zur ESPHome-API verwendet werden: beispielsweise ESPHome-API im Garten und MQTT in einer zweiten Home-Assistant-Instanz. Dazu in der vorhandenen Geräte-YAML ergänzen:
+
+```yaml
+packages:
+  watermeter_mqtt: github://tcsmaxx/esphome-watermeter/packages/mqtt.yaml@main
+```
+
+Existiert bereits ein `packages:`-Block, nur den Eintrag ergänzen. Die Zugangsdaten werden in `secrets.yaml` hinterlegt:
+
+```yaml
+mqtt_broker: "DEIN-BROKER"
+mqtt_port: 1883
+mqtt_username: "DEIN-MQTT-BENUTZER"
+mqtt_password: "DEIN-MQTT-PASSWORT"
+```
+
+Das Paket aktiviert MQTT-Discovery für alle öffentlichen Sensoren, Textsensoren, Problemsensoren und Buttons. Home Assistant benötigt eine MQTT-Integration mit Zugang zu diesem Broker und aktivierter Discovery. Stabile Gerätekennungen auf Basis der MAC-Adresse ordnen die Entitäten dem Gerät zu. Entitäts-IDs anschließend in der Dashboard-Karte anpassen. Verwenden API und MQTT dieselbe Home-Assistant-Instanz, können dort zusätzliche MQTT-Entitäten neben den API-Entitäten erscheinen.
+
+Für **Kamerabild** wird eine eigene MQTT-Camera-Discovery-Nachricht veröffentlicht. Nach jeder automatischen Ableserunde wird deren Rohaufnahme als vollständige binäre JPEG-Nachricht an `${device_name}/camera/image` gesendet, auch bei einer wegen fehlender Referenzen abgewiesenen Aufnahme. Es wird kein zusätzlicher Kameraabruf und kein Livestream gestartet. Setup-Tests versenden keine Kamerabilder über MQTT. Das letzte Bild ist am Broker retained verfügbar; das kann auch eine abgewiesene Aufnahme sein und ist kein Nachweis eines übernommenen Zählerstands.
+
+Die zweite Home-Assistant-Instanz benötigt für dieses Kamerabild keinen direkten HTTP-Zugang zum ESP. Die Referenzkorrektur ist in der lokalen KI-Ansicht sichtbar; MQTT überträgt das bereits vorliegende Roh-JPEG. Ein MQTT-Ausfall löst mit diesem Paket keinen zusätzlichen Broker-Watchdog-Neustart aus. Der Bildversand verwendet den asynchronen ESP-IDF-MQTT-Ausgang, damit die Netzwerkübertragung nicht die Bildverarbeitung blockiert. Die konkreten Zugänge und Brokerrechte müssen zur Installation passen.
+
 ## Architektur und Diagnose
 
 | Datei / Verzeichnis | Aufgabe |
@@ -221,6 +261,8 @@ Der automatische Neustart behandelt Fehler bei weiterhin laufendem Hauptloop. Be
 | `/setup` | Einrichtung und Kalibrierung |
 | `/meter/status` | JSON mit gespeicherter Konfiguration, Betriebszustand und Diagnosen |
 | `/meter/snapshot` | Kameraschnappschuss |
+| `/meter/export` | JSON-Sicherung ohne Zugangsdaten |
+| `/meter/import` | Geprüfter Import über die Setupseite |
 | `/meter/processed` | Letzte gültige KI-Aufnahme mit den verwendeten Rahmen als Antwortmetadaten |
 
 Webaktionen werden im Hauptloop verarbeitet. Der Status wird dort vorbereitet, um den HTTP-Task zu entlasten. Schnappschüsse verwenden eine eigene Bildkopie und halten keinen Kamerapuffer dauerhaft fest. Stackdiagnosen stehen unter `/meter/status` bereit.
@@ -253,6 +295,7 @@ python tests/persistence.py
 python tests/illumination_flow.py
 python tests/led_count_effect.py
 python tests/recovery_flow.py
+python tests/features_flow.py
 
 npm ci
 npx playwright install chromium --only-shell
@@ -260,7 +303,7 @@ node tests/ui_smoke.cjs
 node tests/navigation_smoke.cjs
 ```
 
-Der Build-Check verwendet lokale Komponenten und temporäre Test-Zugangsdaten. `navigation_smoke.cjs` benötigt die generierten Firmwarequellen. Browserprüfungen arbeiten mit einer simulierten Kamera/API; sie prüfen die Bedienung, nicht die Erkennung eines realen Zählers. Änderungen an der festgelegten KI-Basis erfordern eine erneute Integrationsprüfung.
+Der Build-Check verwendet lokale Komponenten und temporäre Test-Zugangsdaten. `navigation_smoke.cjs` benötigt die generierten Firmwarequellen. `features_flow.py` benötigt die durch den Firmware-Build bereitgestellten ArduinoJson-Header. Die MQTT-Prüfungen verwenden einen simulierten Broker-Client; die tatsächliche Brokerverbindung und Discovery in Home Assistant sind nach Installation zu prüfen. Browserprüfungen arbeiten mit einer simulierten Kamera/API; sie prüfen die Bedienung, nicht die Erkennung eines realen Zählers. Änderungen an der festgelegten KI-Basis erfordern eine erneute Integrationsprüfung.
 
 ## Abhängigkeiten
 

@@ -30,6 +30,7 @@ class MeterSetup {
  float confidence_=73.4f;
  uint16_t led_capacity_() const{return 64;}
  std::shared_ptr<uint8_t> preview_;uint32_t preview_sequence_=0;bool preview_rgb_=false;
+ RuntimeSettings runtime_{};float reading_age_=NAN;bool stale_=false;uint32_t config_revision_=0;float digit_confidences_[8]{};std::string confidence_digits_;
  RecoveryRecord recovery_{};bool reboot_pending_=false;uint32_t recovery_delay_ms_=10000;std::string last_reader_log_;std::string reader_phase_()const{return "idle";}
  std::string status_();
 };

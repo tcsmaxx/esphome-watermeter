@@ -2,6 +2,9 @@ substitutions:
   device_name: wasserzaehler
   friendly_name: Wasserzähler
 
+# Optional MQTT: add the package documented in README.md.
+# Credentials belong in secrets.yaml.
+
 esphome:
   name: ${device_name}
   friendly_name: ${friendly_name}

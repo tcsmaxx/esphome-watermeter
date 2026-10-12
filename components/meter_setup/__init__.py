@@ -5,7 +5,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import esp32_camera, meter_reader_tflite, sensor, text_sensor, binary_sensor, web_server_base, light
 from esphome.const import CONF_ID
-AUTO_LOAD = ['button', 'light', 'binary_sensor', 'text_sensor', 'sensor']
+AUTO_LOAD = ['json', 'button', 'light', 'binary_sensor', 'text_sensor', 'sensor']
 DEPENDENCIES = ['esp32_camera', 'meter_reader_tflite', 'web_server']
 ns = cg.esphome_ns.namespace('meter_setup')
 MeterSetup = ns.class_('MeterSetup', cg.Component)
@@ -23,6 +23,17 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional('last_update', default={'name': 'Letzte Aktualisierung'}): text_sensor.text_sensor_schema(icon='mdi:clock-check-outline'),
     cv.Optional('status', default={'name': 'Ablesestatus'}): text_sensor.text_sensor_schema(icon='mdi:information-outline'),
     cv.Optional('error', default={'name': 'Ablesefehler'}): text_sensor.text_sensor_schema(icon='mdi:alert-circle-outline'),
+    cv.Optional('reading_age', default={'name': 'Alter der letzten Ablesung'}): sensor.sensor_schema(unit_of_measurement='s', accuracy_decimals=0, entity_category='diagnostic'),
+    cv.Optional('stale', default={'name': 'Ablesung veraltet'}): binary_sensor.binary_sensor_schema(device_class='problem'),
+    cv.Optional('confidence', default={'name': 'Erkennungskonfidenz'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_1', default={'name': 'Konfidenz Stelle 1'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_2', default={'name': 'Konfidenz Stelle 2'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_3', default={'name': 'Konfidenz Stelle 3'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_4', default={'name': 'Konfidenz Stelle 4'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_5', default={'name': 'Konfidenz Stelle 5'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_6', default={'name': 'Konfidenz Stelle 6'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_7', default={'name': 'Konfidenz Stelle 7'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_8', default={'name': 'Konfidenz Stelle 8'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
     cv.Optional('problem', default={'name': 'Ableseproblem'}): binary_sensor.binary_sensor_schema(device_class='problem'),
 
 }).extend(cv.COMPONENT_SCHEMA)
@@ -43,6 +54,7 @@ def add_dashboard_navigation():
 @coroutine_with_priority(CoroPriority.WEB + 1)
 async def to_code(config):
     add_dashboard_navigation()
+    cg.add_define("USE_LOG_LISTENERS")
     # Construct the existing reader as a subclass; keep all upstream schema/model settings.
     reader_config = CORE.config['meter_reader_tflite']
     readers = reader_config if isinstance(reader_config, list) else [reader_config]
@@ -64,3 +76,9 @@ async def to_code(config):
     for key in ['last_update', 'status', 'error']:
         cg.add(getattr(var, 'set_' + key)(await text_sensor.new_text_sensor(config[key])))
     cg.add(var.set_problem(await binary_sensor.new_binary_sensor(config['problem'])))
+
+    cg.add(var.set_reading_age(await sensor.new_sensor(config['reading_age'])))
+    cg.add(var.set_stale(await binary_sensor.new_binary_sensor(config['stale'])))
+    cg.add(var.set_confidence(await sensor.new_sensor(config['confidence'])))
+    for i in range(8):
+        cg.add(var.set_digit_confidence(i, await sensor.new_sensor(config[f'confidence_{i+1}'])))

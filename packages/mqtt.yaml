@@ -1,0 +1,13 @@
+# Optional: publish sensors and a JPEG snapshot per automatic reading.
+mqtt:
+  broker: !secret mqtt_broker
+  port: !secret mqtt_port
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  topic_prefix: ${device_name}
+  discovery: true
+  discovery_unique_id_generator: mac
+  discovery_object_id_generator: device_name
+  reboot_timeout: 0s
+  idf_send_async: true
+  log_topic: null
