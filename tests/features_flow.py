@@ -25,6 +25,7 @@ source=r'''
 #include <iostream>
 #define USE_MQTT
 #define ESP_LOGW(...) ((void)0)
+#define ESP_LOGE(...) ((void)0)
 constexpr int MAC_ADDRESS_BUFFER_SIZE=13;
 void get_mac_address_into_buffer(char *b){std::strcpy(b,"112233aabbcc");}
 uint32_t tick=0;uint32_t millis(){return tick;}
@@ -111,7 +112,8 @@ int main(){
  original.autofocus_settings_.manual_enabled=1;original.autofocus_settings_.position=623;original.build_export_();MeterSetup manual_backup;manual_backup.pending_import_=original.export_json_;manual_backup.import_config_();assert(manual_backup.config_revision_==1&&manual_backup.autofocus_settings_.manual_enabled&&manual_backup.autofocus_settings_.position==623);
  JsonDocument invalid_manual;deserializeJson(invalid_manual,original.export_json_);invalid_manual["manual_focus_position"]=1024;MeterSetup rejected_manual;serializeJson(invalid_manual,rejected_manual.pending_import_);rejected_manual.import_config_();assert(rejected_manual.config_revision_==0);
  MeterSetup combined;combined.settings_=original.settings_;combined.pending_=combined.settings_;combined.pending_.interval=180;combined.pending_alignment_=original.alignment_;combined.pending_illumination_=original.illumination_settings_;combined.pending_illumination_.brightness=37;combined.pending_warning_after_=720;combined.pending_autofocus_=false;combined.pending_manual_focus_=true;combined.pending_focus_position_=339;combined.pending_standby_=false;combined.have_previous_reading_=true;combined.runtime_.last_valid_epoch=1700000000;assert(combined.save_all_()&&combined.save_ok_&&combined.save_attempt_==1&&combined.settings_.interval==180&&combined.autofocus_settings_.position==339&&combined.illumination_settings_.brightness==37&&combined.runtime_.warning_after==720&&!combined.camera_power_.standby_enabled());assert(combined.have_previous_reading_&&combined.runtime_.last_valid_epoch==1700000000);
- combined.pending_.interval=240;combined.pending_focus_position_=400;combined.autofocus_preference_.fail_next=true;assert(!combined.save_all_()&&!combined.save_ok_&&combined.save_attempt_==2&&combined.settings_.interval==180&&combined.autofocus_settings_.position==339&&combined.saved.settings.interval==180);
+ combined.pending_.interval=240;combined.pending_focus_position_=400;combined.autofocus_preference_.fail_next=true;assert(!combined.save_all_()&&!combined.save_ok_&&combined.save_attempt_==2&&combined.settings_.interval==180&&combined.autofocus_settings_.position==339&&combined.saved.settings.interval==180);assert(combined.message_.find("Fokuseinstellungen")!=std::string::npos);
+ combined.illumination_preference_.fail_next=true;assert(!combined.save_all_()&&!combined.save_ok_&&combined.message_.find("Beleuchtung")!=std::string::npos&&combined.settings_.interval==180);
  std::cout<<"Features passed: backup/reference roundtrip, strict validation/rollback, per-digit matching, age warning/recovery, camera discovery/MAC, binary JPEG/retain/retry/test isolation\n";
 }
 '''

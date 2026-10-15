@@ -1,6 +1,7 @@
 #include "meter_setup.h"
 #include <cstdlib>
 #include <cstring>
+#include "esphome/core/log.h"
 namespace esphome::meter_setup {
 bool MeterSetup::parse_options_(AsyncWebServerRequest *r,bool power) {
   auto number=[r](const char *key,uint32_t lo,uint32_t hi,uint32_t &out){
@@ -29,13 +30,19 @@ bool MeterSetup::save_all_() {
   auto options=runtime_;options.warning_after=pending_warning_after_;if(baseline_changed)options.last_valid_epoch=0;
   AutofocusSettings focus;focus.before_reading=pending_autofocus_;focus.manual_enabled=pending_manual_focus_;focus.position=pending_focus_position_;
   const bool old_standby=camera_power_.standby_enabled(),old_weak=camera_power_.weak_drive();
-  if(!save_configuration_(pending_,pending_alignment_,false)||!illumination_preference_.save(&pending_illumination_)||
-     !runtime_preference_.save(&options)||!autofocus_preference_.save(&focus)||
-     !camera_power_.configure(pending_standby_,pending_weak_drive_)||!global_preferences->sync()){
+  const char *failure=nullptr;
+  if(!save_configuration_(pending_,pending_alignment_,false))failure="Rahmen, Drehung und Referenzen";
+  else if(!illumination_preference_.save(&pending_illumination_))failure="Beleuchtung";
+  else if(!runtime_preference_.save(&options))failure="Ableseeinstellungen";
+  else if(!autofocus_preference_.save(&focus))failure="Fokuseinstellungen";
+  else if(!camera_power_.configure(pending_standby_,pending_weak_drive_))failure="Stromspareinstellungen / Flash-Synchronisierung";
+  else if(!global_preferences->sync())failure="Flash-Synchronisierung";
+  if(failure){
     save_configuration_(settings_,alignment_,false);illumination_preference_.save(&illumination_settings_);
     runtime_preference_.save(&runtime_);autofocus_preference_.save(&autofocus_settings_);
     camera_power_.configure(old_standby,old_weak);global_preferences->sync();
-    message_="Speichern fehlgeschlagen · Änderungen bleiben ungespeichert";return false;
+    message_=std::string("Speichern fehlgeschlagen: ")+failure+" · Änderungen bleiben ungespeichert";
+    ESP_LOGE("meter_setup","%s",message_.c_str());return false;
   }
   settings_=pending_;alignment_=draft_alignment_=pending_alignment_;runtime_=options;autofocus_settings_=focus;
   illumination_settings_=pending_illumination_;

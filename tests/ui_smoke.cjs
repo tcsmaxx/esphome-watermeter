@@ -7,16 +7,23 @@ const {chromium} = require('playwright');
  const html=fs.readFileSync(path.join(__dirname,'../components/meter_setup/web_ui.h'),'utf8').split('R"HTML(')[1].split(')HTML"')[0];
  const browser=await chromium.launch({...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),headless:true,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:800,height:1000}});
- let snapshotDelay=1600,captureBusyReplies=0,statusRequests=0;let captureDelay=0;let rawPreview=null;let confirmReset=false;const errors=[],posts=[],dialogs=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());if(d.type()==='confirm'&&confirmReset)await d.accept();else await d.dismiss()});
+ let rejectSave=null;let snapshotDelay=1600,captureBusyReplies=0,statusRequests=0;let captureDelay=0;let rawPreview=null;let confirmReset=false;const errors=[],posts=[],dialogs=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());if(d.type()==='confirm'&&confirmReset)await d.accept();else await d.dismiss()});
  const state={rotation_tenths:0,camera_standby_available:true,camera_standby_enabled:true,camera_weak_drive:false,camera_power_status:'Sensor im Software-Standby',autofocus_available:true,autofocus_before_reading:true,autofocus_status:'Bereit · noch nicht fokussiert',autofocus_error:0,boxes:Array.from({length:8},()=>[0,0,0,0]),decimals:3,interval:60,max_step:1000,baseline:0,reset_count:0,calibrated:false,busy:false,paused:true,frame:7,digits:'',confidence:0,message:'Noch nicht eingerichtet',illumination_available:true,illumination_led_count:8,illumination_led_capacity:64,illumination_enabled:false,illumination_brightness:30,illumination_settle_ms:1000,illumination_on:false,light_test:false,alignment_enabled:false,references:Array.from({length:2},()=>[0,0,0,0]),reference_ready:false,alignment_ms:0,alignment_result:'Ausgeschaltet',preview_available:false,preview_sequence:0,preview_corrected:false,warning_after:300,config_revision:0,reading_age:null,stale:false,digit_confidences:[]};
  await page.route('http://meter.test/**',async route=>{
-  const u=new URL(route.request().url());
+  const wireURL=new URL(route.request().url()),u=new URL(wireURL);
+  if(route.request().method()==='POST'&&route.request().postData()&&u.pathname!=='/meter/import'){
+   assert.equal(wireURL.search,'','Setup writes must not put settings in the URL');
+   assert.equal(route.request().headers()['content-type'],'application/x-www-form-urlencoded');
+   assert(Buffer.byteLength(route.request().postData())<=1024,'ESPHome form body limit');
+   for(const [key,value] of new URLSearchParams(route.request().postData()))u.searchParams.set(key,value);
+  }
   if(u.pathname==='/setup')return route.fulfill({contentType:'text/html',body:html});
   if(u.pathname==='/meter/export')return route.fulfill({contentType:'application/json',body:JSON.stringify({format:'esphome-watermeter',version:1,settings:{interval:120},warning_after:600})});
   if(u.pathname==='/meter/status'){++statusRequests;return route.fulfill({contentType:'application/json',body:JSON.stringify(state)});}
   if(u.pathname==='/meter/processed'){if(!state.preview_corrected&&rawPreview)return route.fulfill({contentType:'image/jpeg',headers:{'X-Meter-Image':String(state.preview_sequence),'X-Meter-Boxes':JSON.stringify(state.boxes),'X-Meter-References':JSON.stringify(state.references)},body:rawPreview});const pixels=Buffer.alloc(640*480*3);for(let i=0;i<pixels.length;i+=3){pixels[i]=20;pixels[i+1]=140;pixels[i+2]=220;}return route.fulfill({contentType:'application/octet-stream',headers:{'X-Meter-Image':String(state.preview_sequence),'X-Meter-Boxes':JSON.stringify(state.boxes),'X-Meter-References':JSON.stringify(state.references)},body:pixels});}
   if(u.pathname==='/meter/snapshot'){const snapshotFrame=state.frame;if(snapshotDelay)await new Promise(r=>setTimeout(r,snapshotDelay));return route.fulfill({contentType:'image/svg+xml',headers:{'X-Meter-Frame':String(snapshotFrame)},body:'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#ccc"/></svg>'});}
-  posts.push({url:u,headers:route.request().headers()});
+  posts.push({url:u,wireURL,headers:route.request().headers()});
+  if(u.pathname==='/meter/save_all'&&rejectSave)return route.fulfill({status:rejectSave.status,body:rejectSave.body});
   if(u.pathname==='/meter/preview'&&captureBusyReplies>0){--captureBusyReplies;state.busy=true;state.reader_phase='autofocus';setTimeout(()=>{state.busy=false;state.reader_phase='idle'},1700);return route.fulfill({status:409,body:'Bitte laufende Aktion abwarten'});}
   if(u.pathname==='/meter/import'){const incoming=JSON.parse(new URLSearchParams(route.request().postData()).get('data'));state.interval=incoming.settings.interval;state.warning_after=incoming.warning_after;state.config_revision++;state.message='Sicherung importiert; Automatik pausiert';state.paused=true;}
   if(u.pathname==='/meter/light_on'){state.light_test=state.illumination_on=true;}
@@ -105,6 +112,13 @@ const {chromium} = require('playwright');
  await page.waitForFunction(()=>document.getElementById('reading_health').textContent.includes('WARNUNG'));assert((await page.textContent('.crop:nth-child(3)')).includes('84.4 %'));
  state.stale=false;state.reading_age=0;await page.waitForFunction(()=>!document.getElementById('reading_health').textContent.includes('WARNUNG'));
  state.busy=true;await page.waitForFunction(()=>document.getElementById('reset').disabled);assert.equal(await page.locator('#restart').isEnabled(),true);confirmReset=true;await page.click('#restart');await page.waitForTimeout(100);assert(posts.some(p=>p.url.pathname==='/meter/restart'));confirmReset=false;state.busy=false;await page.waitForFunction(()=>!document.getElementById('reset').disabled);
+ // Rejected saves retain the real cause across background polling and can be retried.
+ rejectSave={status:400,body:'Referenzbereiche zuerst aus dem angezeigten Bild übernehmen'};
+ await page.click('#save');await page.waitForFunction(()=>!activeAction&&document.getElementById('save_state').textContent.includes('Referenzbereiche'));
+ await page.waitForTimeout(1300);assert((await page.textContent('#save_state')).includes('Referenzbereiche'));assert(await page.evaluate(()=>dirty));
+ rejectSave={status:431,body:'<html><body>Request Header Fields Too Large</body></html>'};
+ await page.click('#save');await page.waitForFunction(()=>!activeAction&&document.getElementById('save_state').textContent.includes('HTTP 431'));assert(!(await page.textContent('#save_state')).includes('<html>'));
+ rejectSave=null;
  // Rotation updates locally, preserves the raw source and requires confirmation before clearing ROIs.
  const rotationPosts=posts.length,oldBoxes=await page.evaluate(()=>JSON.stringify(boxes));
  await page.click('[data-rotate="900"]');assert.equal(await page.inputValue('#rotation'),'0');assert.equal(await page.evaluate(()=>JSON.stringify(boxes)),oldBoxes);

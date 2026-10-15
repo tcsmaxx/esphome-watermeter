@@ -86,14 +86,14 @@ async function post(action,params={}){
  try{
   const until=Date.now()+65000;
   while(true){
-   const r=await request('/meter/'+action+'?'+new URLSearchParams(params),{method:'POST',headers:{'X-Meter-Setup':'1'}});
+   const r=await request('/meter/'+action,{method:'POST',headers:{'X-Meter-Setup':'1','Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(params)});
    if(r.status===409&&!emergency){
     requestPending=false;$('message').textContent='Gerät beschäftigt · Aktion wartet auf Abschluss …';
     await waitStatus(s=>!s.busy&&!s.command_pending,Math.max(1,until-Date.now()));
     if(Date.now()>=until)throw Error('Gerät bleibt beschäftigt; /meter/status prüfen.');
     requestPending=true;continue;
    }
-   if(!r.ok)throw Error(await r.text());
+   if(!r.ok){const detail=(await r.text()).trim(),plain=detail&&!/<(?:!doctype|html|body|head)[\s>]/i.test(detail);throw Error(r.status===414?'Anfrage zu lang (HTTP 414); Setupseite nach Firmware-Update neu laden':r.status===431?'HTTP-Anfragekopf zu groß (HTTP 431)':(plain?detail:'Anfrage abgewiesen')+' (HTTP '+r.status+')');}
    requestPending=false;
    // One status loop confirms completion; no extra HTTP polling per button.
    if(!['capture','focus','manual_focus','preview','live_start','restart','pause','live_stop'].includes(action))await waitStatus(s=>!s.command_pending&&!s.busy);
@@ -162,7 +162,7 @@ $('save').onclick=async()=>{
   const result=await waitStatus(s=>(s.save_attempt||0)>before,15000);
   if(!result.save_ok)throw Error(result.message||'Speichern fehlgeschlagen');
   dirty=false;baselineDirty=false;focusDirty=false;powerDirty=false;saveState();
- }catch(e){dirty=true;saveState('Speichern fehlgeschlagen · Änderungen nicht übernommen');reportError(e)}finally{activeAction=null}
+ }catch(e){dirty=true;saveState('Speichern fehlgeschlagen: '+e.message+' · Änderungen bleiben ungespeichert');reportError(e)}finally{activeAction=null}
 };
 
 function lightParams(){return {led_count:$('led_count').value,enabled:$('led_enabled').checked?'1':'0',brightness:$('led_brightness').value,settle_ms:$('led_settle').value}}
