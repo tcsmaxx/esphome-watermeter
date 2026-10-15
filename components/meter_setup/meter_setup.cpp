@@ -201,7 +201,7 @@ void MeterSetup::setup() {
     if(recovery_.consecutive_timeouts) recovery_delay_ms_=std::min<uint32_t>(1800000,60000U << std::min<uint32_t>(5,recovery_.consecutive_timeouts-1));
   }
   next_=millis()+recovery_delay_ms_;
-  status_json_=status_();
+  update_status_();
   camera_power_.setup();
   autofocus_setup_();
   features_setup_();
@@ -222,7 +222,9 @@ void MeterSetup::on_camera_image(const std::shared_ptr<camera::CameraImage> &ima
   std::lock_guard<std::mutex> guard(mutex_);
   jpeg_=std::move(copy); jpeg_size_=len; ++frame_;
   if(capture_pending_ && capture_stage_==2 && !capture_inference_) {
-    capture_pending_=false;set_illumination_(light_test_,pending_illumination_);message_="Kamerabild aufgenommen";
+    capture_pending_=false;
+    if(live_){live_streaming_=true;live_last_frame_=frame_;live_frame_at_=millis();camera_->start_stream(camera::WEB_REQUESTER);message_="Debug-Livebild aktiv · Fokus bleibt unverändert";}
+    else {set_illumination_(light_test_,pending_illumination_);message_="Kamerabild aufgenommen";}
   }
 }
 void MeterSetup::reset_() {
@@ -290,7 +292,7 @@ void MeterSetup::begin_capture_(bool inference) {
   if(automatic_light) {
     set_illumination_(true,lighting);
     capture_stage_=0;capture_deadline_=millis()+lighting.settle_ms;
-  } else if(camera_power_.supported()||autofocus_once_||(inference&&autofocus_settings_.before_reading&&autofocus_.supported())) {
+  } else if(camera_power_.supported()||autofocus_once_||(autofocus_settings_.before_reading&&autofocus_.supported())) {
     capture_stage_=0;capture_deadline_=millis();
   } else {
     capture_stage_=2;
@@ -304,7 +306,7 @@ void MeterSetup::begin_capture_(bool inference) {
 }
 void MeterSetup::illumination_loop_() {
   autofocus_loop_();
-  if(light_test_ && int32_t(millis()-light_test_deadline_)>=0) {
+  if(light_test_ && !live_ && int32_t(millis()-light_test_deadline_)>=0) {
     light_test_=false;if(!busy_ && !capture_pending_)set_illumination_(false,illumination_settings_);
   }
   if(!capture_pending_) return;
@@ -337,13 +339,14 @@ void MeterSetup::start_(bool test) {
 void MeterSetup::loop() {
   std::lock_guard<std::mutex> guard(mutex_);
   Command cmd=command_; command_=NONE;
+  live_loop_(cmd==LIVE_START,cmd==LIVE_STOP || (cmd!=NONE && cmd!=LIVE_START));
   if(cmd==RESTART && !reboot_pending_) {
     record_fault_("Manueller Neustart über Setup",false);
     reboot_pending_=true;reboot_at_=millis()+1500;paused_=true;
     set_illumination_(false,illumination_settings_);message_="Gerät wird neu gestartet …";
   }
   recovery_loop_();
-  if(reboot_pending_) {diagnostics_();if(millis()-status_updated_>=250){status_json_=status_();status_updated_=millis();}return;}
+  if(reboot_pending_) {diagnostics_();if(millis()-status_updated_>=250){update_status_();status_updated_=millis();}return;}
   if(cmd==POWER_SAVE){
     if(camera_power_.configure(pending_standby_,pending_weak_drive_)){message_="Kamera-Stromspareinstellungen gespeichert";build_export_();}
     else message_="Stromspareinstellungen konnten nicht gespeichert werden";
@@ -364,7 +367,7 @@ void MeterSetup::loop() {
   }
   if(cmd==LIGHT_ON) {light_test_=true;light_test_deadline_=millis()+120000;set_illumination_(true,pending_illumination_);message_="Lichttest eingeschaltet (maximal 2 Minuten)";}
   if(cmd==LIGHT_OFF) {light_test_=false;set_illumination_(false,illumination_settings_);message_="Licht ausgeschaltet";}
-  camera_power_.loop(busy_||capture_pending_||autofocus_.state()==AutofocusController::RUNNING||autofocus_.state()==AutofocusController::HUNG);
+  camera_power_.loop(live_||busy_||capture_pending_||autofocus_.state()==AutofocusController::RUNNING||autofocus_.state()==AutofocusController::HUNG);
   illumination_loop_();
   if(cmd==PAUSE) { paused_=true; message_="Automatische Ablesung pausiert"; }
   if(cmd==RESUME && settings_.calibrated) { paused_=false; next_=millis(); }
@@ -398,7 +401,7 @@ void MeterSetup::loop() {
   features_loop_();
   diagnostics_();
   if(millis()-status_updated_>=250) {
-    status_json_=status_();
+    update_status_();
     status_updated_=millis();
   }
 }
@@ -495,6 +498,8 @@ std::string MeterSetup::status_() {
   out+=",\"baseline\":"; out+=std::to_string(settings_.baseline);
   out+=",\"max_step\":"; out+=std::to_string(settings_.max_step);
   out+=",\"calibrated\":"; out+=settings_.calibrated?"true":"false";
+  out+=",\"live\":";out+=live_?"true":"false";
+  out+=",\"live_remaining\":";out+=std::to_string(live_&&int32_t(live_deadline_-millis())>0?(live_deadline_-millis()+999)/1000:0);
   out+=",\"busy\":"; out+=(busy_||capture_pending_)?"true":"false";
   out+=",\"paused\":"; out+=paused_?"true":"false";
   out+=",\"frame\":"; out+=std::to_string(frame_);
@@ -550,16 +555,34 @@ std::string MeterSetup::status_() {
   out+=",\"http_task\":"; out+=quote(http_task_name_);
   out+='}'; return out;
 }
+void MeterSetup::live_loop_(bool start,bool stop) {
+  if(live_ && (stop || int32_t(millis()-live_deadline_)>=0))stop_live_();
+  if(live_ && !capture_pending_ && !live_streaming_){const auto failure=message_;stop_live_();message_="Livebild abgebrochen: "+failure;}
+  if(live_ && live_streaming_){
+    if(frame_!=live_last_frame_){live_last_frame_=frame_;live_frame_at_=millis();}
+    if(millis()-live_frame_at_>10000){stop_live_();message_="Livebild abgebrochen: seit 10 Sekunden kein Kamerabild";}
+  }
+  if(start && !live_){live_was_paused_=paused_;paused_=true;live_=true;live_streaming_=false;live_deadline_=millis()+120000;message_="Livebild wird vorbereitet …";begin_capture_(false);}
+}
+void MeterSetup::update_status_() {
+  std::lock_guard<std::mutex> guard(status_mutex_);status_json_=status_();
+}
+void MeterSetup::stop_live_() {
+  if(!live_)return;
+  camera_->stop_stream(camera::WEB_REQUESTER);live_=false;live_streaming_=false;
+  // A focus worker must finish under the normal timeout/recovery supervision.
+  if(capture_stage_!=3)capture_pending_=false;
+  inference_started_=false;
+  paused_=live_was_paused_;next_=millis()+settings_.interval*1000;
+  set_illumination_(light_test_||capture_pending_,pending_illumination_);
+  message_=capture_pending_?"Livebild beendet; laufende Fokussierung wird abgeschlossen":"Livebild beendet";
+}
 void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   std::string url(r->url_to(url_buf).c_str());
   if(url=="/setup" && r->method()==HTTP_GET) { r->send(200,"text/html; charset=utf-8",WEB_UI); return; }
-  std::unique_lock<std::mutex> guard(mutex_);
-  if(url=="/meter/export" && r->method()==HTTP_GET) {
-    auto data=export_json_;guard.unlock();auto *response=r->beginResponse(200,"application/json",data);
-    response->addHeader("Content-Disposition","attachment; filename=wasserzaehler-backup.json");response->addHeader("Cache-Control","no-store");r->send(response);return;
-  }
   if(url=="/meter/status" && r->method()==HTTP_GET) {
+    std::unique_lock<std::mutex> guard(status_mutex_);
     http_stack_free_=uxTaskGetStackHighWaterMark(nullptr);
     if(http_task_name_.empty()) {
       http_task_name_=pcTaskGetName(nullptr);
@@ -568,6 +591,11 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     auto s=status_json_; guard.unlock();
     auto *response=r->beginResponse(200,"application/json",s);
     response->addHeader("Cache-Control","no-store"); r->send(response); return;
+  }
+  std::unique_lock<std::mutex> guard(mutex_);
+  if(url=="/meter/export" && r->method()==HTTP_GET) {
+    auto data=export_json_;guard.unlock();auto *response=r->beginResponse(200,"application/json",data);
+    response->addHeader("Content-Disposition","attachment; filename=wasserzaehler-backup.json");response->addHeader("Cache-Control","no-store");r->send(response);return;
   }
   if(url=="/meter/processed" && r->method()==HTTP_GET) {
     if(!preview_) {r->send(503,"text/plain; charset=utf-8","Kein gültiges KI-Bild; Rahmen testen und Ausrichtungsstatus prüfen");return;}
@@ -590,7 +618,14 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   if(url=="/meter/restart") {
     command_=RESTART;r->send(200,"text/plain; charset=utf-8","Neustart vorgemerkt");return;
   }
+  if(url=="/meter/live_stop"){
+    if(command_==RESTART){r->send(409,"text/plain","Neustart läuft bereits");return;}
+    if(live_||command_==LIVE_START)command_=LIVE_STOP;
+    r->send(200,"text/plain","Livebild wird beendet");return;
+  }
+  if(live_){r->send(409,"text/plain; charset=utf-8","Zuerst Livebild stoppen");return;}
   if(command_!=NONE || ((busy_ || capture_pending_) && url!="/meter/pause")) {r->send(409,"text/plain","Bitte laufende Aktion abwarten");return;}
+  if(url=="/meter/live_start"){command_=LIVE_START;r->send(200,"text/plain","Livebild wird gestartet");return;}
   if(url=="/meter/power_save"){
     if(!r->hasParam("standby")||!r->hasParam("weak_drive")){r->send(400,"text/plain","standby und weak_drive erforderlich");return;}
     const auto standby=r->getParam("standby")->value(),weak=r->getParam("weak_drive")->value();

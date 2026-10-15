@@ -9,7 +9,7 @@ header = (root / "components/meter_setup/meter_setup.h").read_text()
 settings = header[header.index("struct Settings {"):header.index("class MeterSetup")]
 quote = cpp[cpp.index("static std::string quote("):cpp.index("int MeterSetup::invalid_box_(")]
 zones = cpp[cpp.index("static std::string zones(const Settings &s) {"):cpp.index("void MeterSetup::setup()")]
-status = cpp[cpp.index("std::string MeterSetup::status_()"):cpp.index("void MeterSetup::handleRequest(")]
+status = cpp[cpp.index("std::string MeterSetup::status_()"):cpp.index("void MeterSetup::live_loop_(")]
 source = r'''
 #include <string>
 #include <memory>
@@ -19,12 +19,14 @@ source = r'''
 #include <cstdio>
 #include <iostream>
 #define ESPHOME_LOOP_TASK_STACK_SIZE 32768
+uint32_t millis(){return 100;}
 unsigned uxTaskGetStackHighWaterMark(void *) { return 24000; }
 '''+f'#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+settings+quote+zones+r'''
 class MeterSetup {
  public:
  Settings settings_{}; AlignmentReference alignment_{},draft_alignment_{}; uint32_t reference_revision_=0,alignment_ms_=0;std::string alignment_result_="Ausgeschaltet";
  bool busy_=false,paused_=true,capture_pending_=false,illumination_on_=false,light_test_=false;void *illumination_=nullptr;IlluminationSettings illumination_settings_{};
+ bool live_=false;uint32_t live_deadline_=0;
  uint32_t frame_=12,http_stack_free_=1200,reset_count_=0;
  std::string digits_="00123456",message_="Test \"ok\"",http_task_name_="httpd";
  float confidence_=73.4f;

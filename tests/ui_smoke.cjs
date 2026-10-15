@@ -7,7 +7,7 @@ const {chromium} = require('playwright');
  const html=fs.readFileSync(path.join(__dirname,'../components/meter_setup/web_ui.h'),'utf8').split('R"HTML(')[1].split(')HTML"')[0];
  const browser=await chromium.launch({...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),headless:true,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:800,height:1000}});
- let rawPreview=null;let confirmReset=false;const errors=[],posts=[],dialogs=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());if(d.type()==='confirm'&&confirmReset)await d.accept();else await d.dismiss()});
+ let captureDelay=0;let rawPreview=null;let confirmReset=false;const errors=[],posts=[],dialogs=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());if(d.type()==='confirm'&&confirmReset)await d.accept();else await d.dismiss()});
  const state={camera_standby_available:true,camera_standby_enabled:true,camera_weak_drive:false,camera_power_status:'Sensor im Software-Standby',autofocus_available:true,autofocus_before_reading:true,autofocus_status:'Bereit · noch nicht fokussiert',autofocus_error:0,boxes:Array.from({length:8},()=>[0,0,0,0]),decimals:3,interval:60,max_step:1000,baseline:0,reset_count:0,calibrated:false,busy:false,paused:true,frame:0,digits:'',confidence:0,message:'Noch nicht eingerichtet',illumination_available:true,illumination_led_count:8,illumination_led_capacity:64,illumination_enabled:false,illumination_brightness:30,illumination_settle_ms:1000,illumination_on:false,light_test:false,alignment_enabled:false,references:Array.from({length:2},()=>[0,0,0,0]),reference_ready:false,alignment_ms:0,alignment_result:'Ausgeschaltet',preview_available:false,preview_sequence:0,preview_corrected:false,warning_after:300,config_revision:0,reading_age:null,stale:false,digit_confidences:[]};
  await page.route('http://meter.test/**',async route=>{
   const u=new URL(route.request().url());
@@ -25,12 +25,16 @@ const {chromium} = require('playwright');
   if(u.pathname==='/meter/focus'){state.autofocus_status='Fokus gefunden';state.frame++;}
   if(u.pathname==='/meter/light_save'){state.illumination_led_count=+u.searchParams.get('led_count');state.illumination_enabled=u.searchParams.get('enabled')==='1';state.illumination_brightness=+u.searchParams.get('brightness');state.illumination_settle_ms=+u.searchParams.get('settle_ms');}
   if(u.pathname==='/meter/reference'){state.reference_ready=true;state.references=Array.from({length:2},(_,i)=>u.searchParams.get('references').split(',').slice(i*4,i*4+4).map(Number));state.message='Referenzen vorbereitet'}
-  if(u.pathname==='/meter/capture')state.frame++;
+  if(u.pathname==='/meter/live_start'){state.live=true;state.live_remaining=120;state.frame++;}
+  if(u.pathname==='/meter/live_stop'){state.live=false;state.message='Livebild beendet';}
+  if(u.pathname==='/meter/capture'){if(captureDelay)await new Promise(r=>setTimeout(r,captureDelay));state.frame++;state.message='Kamerabild aufgenommen';}
   if(u.pathname==='/meter/reset'){state.reset_count++;state.boxes=Array.from({length:8},()=>[0,0,0,0]);state.digits='';state.calibrated=false;state.message='Zählerkonfiguration gelöscht'}
   return route.fulfill({status:200,body:'Aktion vorgemerkt'});
  });
  await page.goto('http://meter.test/setup');await page.waitForFunction(()=>document.getElementById('message').textContent.includes('Noch nicht'));
- await page.click('#capture');await page.waitForFunction(()=>ready);
+ captureDelay=1200;await page.click('#capture');await page.waitForFunction(()=>document.getElementById('message').textContent.includes('Neue Aufnahme wird angefordert'));await page.waitForFunction(()=>ready);captureDelay=0;await page.waitForFunction(()=>document.getElementById('message').textContent.includes('Kamerabild aufgenommen'));
+ await page.click('#live');await page.waitForFunction(()=>document.getElementById('live').textContent==='Livebild stoppen');assert(await page.isDisabled('#capture'));assert(await page.isDisabled('#focus'));assert((await page.textContent('#message')).includes('Debug-Livebild'));state.frame++;await page.waitForFunction(f=>photoFrame===f,state.frame);await page.click('#live');await page.waitForFunction(()=>document.getElementById('live').textContent==='Livebild starten');assert.equal(await page.isDisabled('#capture'),false);
+ state.busy=true;state.reader_phase='autofocus';await page.waitForFunction(()=>document.getElementById('message').textContent.includes('Objektiv wird scharfgestellt'));state.busy=false;state.reader_phase='idle';await page.waitForFunction(()=>!document.getElementById('capture').disabled);
  let bounds=await page.locator('#image').boundingBox();
  const xy=(x,y)=>[bounds.x+x*bounds.width/640,bounds.y+y*bounds.height/480];
  await page.mouse.move(...xy(40,100));await page.mouse.down();await page.mouse.move(...xy(600,170));await page.mouse.up();await page.click('#split');

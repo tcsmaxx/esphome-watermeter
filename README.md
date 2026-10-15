@@ -219,13 +219,22 @@ Der letzte Kamera- oder Inferenzfehler bleibt in der Setup-Diagnose und unter `/
 
 Der automatische Neustart behandelt Fehler bei weiterhin laufendem Hauptloop. Bei komplett ausgefallenem Gerät, fehlender Versorgung oder nicht erreichbarem WLAN ist ein unabhängiger Fernschalter für die Stromversorgung nötig; OTA und Software-Neustart benötigen eine erreichbare Firmware.
 
+## Debug-Livebild und Fortschritt
+
+**Livebild starten** zeigt im Setup das Rohbild mit etwa einem neuen Bild pro Sekunde. Die automatische Ablesung pausiert währenddessen, Kamera und konfigurierte Beleuchtung bleiben an. Der Fokus wird beim Start entsprechend der gespeicherten Einstellung einmal gesetzt und während des Streams beibehalten. Zum Nachfokussieren das Livebild stoppen und **Neu fokussieren + Bild** wählen.
+
+**Livebild stoppen** oder das Zeitlimit von zwei Minuten beenden den Stream und stellen den vorherigen Automatikzustand wieder her. Bleiben nach dem Streamstart zehn Sekunden lang neue Bilder aus, wird der Debugbetrieb beendet. Auch bei Verbindungsabbruch endet er spätestens am Zeitlimit. Native Home-Assistant-Streams sind davon unabhängig.
+
+Die Statuszeile zeigt Aufwecken, Lichtvorlauf, Fokus, Pufferwechsel, Aufnahme und Erkennung. Klicks erhalten unmittelbar eine Rückmeldung; Statusabfragen verwenden einen getrennt geschützten Zwischenspeicher und warten nicht auf die Bildverarbeitung. `/meter/status` ergänzt `live` und `live_remaining` (Sekunden).
+
+
 ## Kamera-Standby und Wärme
 
 Die OV5640 wird bei aktivierter Option **Sensor zwischen Aufnahmen in Standby** fünf Sekunden nach der letzten Aktivität über das Software-Power-down-Bit in Register `0x3008` schlafen gelegt. Das ist standardmäßig aktiv. Es werden ausschließlich die Power-down-Bits maskiert geschrieben und zurückgelesen; der Sensor wird nicht zurückgesetzt und seine Stromversorgung nicht physisch getrennt. Bei der OV3660 wird dieser Registerzugriff übersprungen.
 
 Leerlaufbilder sind abgeschaltet (`idle_framerate: 0 fps`); die Komponente setzt dies auch für bestehende Geräte-Konfigurationen beim Generieren der Firmware durch. Normale Home-Assistant-Bildabfragen bekommen die letzte tatsächliche Aufnahme aus dem JPEG-Zwischenspeicher, einschließlich ihres ursprünglichen eingebrannten Aufnahmezeitpunkts. Ein ausdrücklich gestarteter **Livestream** hält die Kamera aktiv, bis er beendet wird. Die automatische Ablesung und **Neues Bild** im Setup wecken den Sensor auf, warten mindestens 300 ms und verwerfen vor der eigentlichen Aufnahme den alten Kamerapuffer. Beleuchtungsvorlauf, Autofokus, Ausrichtung und OCR laufen anschließend wie konfiguriert. Nach dem Aufwecken wird die Autofokus-Firmware beim nächsten Fokuslauf neu initialisiert, damit kein erhalten gebliebener AF-Zustand vorausgesetzt wird. Der Setup-Snapshot bleibt das zuletzt gespeicherte Rohbild; **Neues Bild** fordert eine neue Aufnahme an.
 
-Im Setup zeigt **Kamera & Wärme** den aktuellen Zustand. **Geringere Ausgangstreiber-Stärke** setzt nur Bit 7:6 von Register `0x302c` auf 1×. Diese Option ist standardmäßig **aus**, insbesondere wegen möglicher Signalfehler mit langen Kameraflexkabeln. Beim Ausschalten wird die beim Start vorgefundene Treiber-Stärke wiederhergestellt. Bei Bildstörungen die Option deaktivieren. Einstellungen mit **Stromsparen speichern** sichern; Export/Import und Zurücksetzen berücksichtigen beide Optionen. Ältere Sicherungen behalten die vorhandenen Stromspareinstellungen bei.
+Im Setup zeigt **Kamera & Wärme** den aktuellen Zustand. **Schwächere Kamerasignale (optional)** setzt nur Bit 7:6 von Register `0x302c` auf 1×. Diese Option ist standardmäßig **aus**, insbesondere wegen möglicher Signalfehler mit langen Kameraflexkabeln. Beim Ausschalten wird die beim Start vorgefundene Treiber-Stärke wiederhergestellt. Bei Bildstörungen die Option deaktivieren. Einstellungen mit **Stromsparen speichern** sichern; Export/Import und Zurücksetzen berücksichtigen beide Optionen. Ältere Sicherungen behalten die vorhandenen Stromspareinstellungen bei.
 
 `/meter/status` enthält `camera_standby_available`, `camera_standby_enabled`, `camera_sleeping`, `camera_weak_drive` und `camera_power_status`. Der Status bestätigt die Registereinstellung, misst aber keine Temperatur und keinen Stromverbrauch. Das Modul kann auch im Software-Standby warm bleiben; die tatsächlich erreichbare Temperaturreduzierung muss am eingebauten Gerät geprüft werden. Kühlkörper und dessen Belüftung bleiben erforderlich.
 
@@ -235,8 +244,8 @@ Unterstützt wird das Seeed-Modul **OV5640 Camera for XIAO ESP32S3 Sense (With H
 
 Im Setup befindet sich der Abschnitt **Autofokus · OV5640**:
 
-- **Jetzt fokussieren** pausiert die automatische Ablesung, verwendet den gespeicherten Beleuchtungsvorlauf, fokussiert einmal und nimmt anschließend ein neues Vorschaubild auf. Danach mit **Fortsetzen** die Automatik wieder starten.
-- **Vor jeder Ablesung einmal fokussieren** ist standardmäßig aktiv und lässt sich mit **Fokus speichern** dauerhaft ändern. Ausgeschaltet wird nur auf Knopfdruck fokussiert; die mechanische Position ist nicht als Konfigurationswert gespeichert. Eine unveränderte Linsenposition über Standby und Neustarts wird nicht vorausgesetzt. Bei aktiviertem Standby ist der Einzelfokus vor jeder Ablesung empfehlenswert.
+- **Neu fokussieren + Bild** pausiert die automatische Ablesung, verwendet den gespeicherten Beleuchtungsvorlauf, fokussiert einmal und nimmt anschließend ein neues Vorschaubild auf. Danach mit **Fortsetzen** die Automatik wieder starten.
+- **Automatisch vor jeder neuen Aufnahme fokussieren** gilt für **Neues Bild**, Rahmentests und regelmäßige Ablesungen; beim Debug-Livebild wird einmal beim Start fokussiert. Die Option ist standardmäßig aktiv und lässt sich mit **Fokus speichern** dauerhaft ändern. Ausgeschaltet wird nur auf Knopfdruck fokussiert; die mechanische Position ist nicht als Konfigurationswert gespeichert. Eine unveränderte Linsenposition über Standby und Neustarts wird nicht vorausgesetzt. Bei aktiviertem Standby ist der Einzelfokus vor jeder Ablesung empfehlenswert.
 - Der Fokusstatus wird im Setup und in `/meter/status` angezeigt (`autofocus_available`, `autofocus_before_reading`, `autofocus_status`, `autofocus_error`).
 
 Der Ablauf ist **Lichtvorlauf → Einzelfokus → veralteten Kamerapuffer verwerfen → frisches Bild → Ausrichtung und OCR**. Es wird kein kontinuierlicher Autofokus aktiviert. Firmware-Initialisierung und Treiberaufrufe laufen in einer separaten Aufgabe mit 5 KiB Stack. Die eigentliche Scharfstellung wird höchstens vier Sekunden geprüft; die gesamte Fokusaufgabe hat ein Zeitlimit von 15 Sekunden. Ein normaler Fokusfehler verwirft die Aufnahme und plant den nächsten Ableseversuch, ohne einen Zählerstand zu übernehmen. Eine hängende Fokusaufgabe wird isoliert und löst nach fünf Sekunden einen protokollierten Neustart aus.

@@ -45,7 +45,7 @@ using AddressableLightState=LightState;
 }
 struct CountedWhiteEffect {explicit CountedWhiteEffect(void*){}};
 namespace camera {enum CameraRequester{WEB_REQUESTER};struct CameraImage{std::vector<uint8_t> data=std::vector<uint8_t>(20,3);size_t get_data_length(){return data.size();}uint8_t *get_data_buffer(){return data.data();}};}
-struct Camera {int requests=0;void request_image(camera::CameraRequester){++requests;}};
+struct Camera {int requests=0,streams=0;void start_stream(camera::CameraRequester){++streams;}void request_image(camera::CameraRequester){++requests;}};
 struct Reader {bool paused=true;int updates=0;virtual ~Reader(){};void set_pause_processing(bool v){paused=v;}void update(){++updates;}};
 struct AlignedMeterReader:Reader {int arms=0;void arm_for_capture(){++arms;}};
 class MeterSetup {
@@ -55,6 +55,7 @@ class MeterSetup {
  struct Power{bool available=false,awake=true;int requests=0;void request(){++requests;}bool supported(){return available;}bool ready(){return awake;}uint32_t generation(){return 0;}}camera_power_;
  uint32_t autofocus_power_generation_=UINT32_MAX;
  AutofocusSettings autofocus_settings_{1,0};bool autofocus_once_=false,autofocus_used_=false;struct AF{bool supported(){return false;}}autofocus_;bool start_autofocus_(){return false;}void autofocus_loop_(){}
+ bool live_=false,live_streaming_=false;uint32_t live_last_frame_=0,live_frame_at_=0;
  Settings settings_;std::mutex mutex_;bool busy_=false,test_=false,reading_problem_=false;std::string message_,reading_error_;
  uint32_t next_=0,frame_=0;std::shared_ptr<uint8_t> jpeg_;size_t jpeg_size_=0;
  void load_(){
@@ -79,6 +80,7 @@ int main(){
  photo.on_camera_image(img);assert(photo.frame_==0);now=1099;photo.illumination_loop_();assert(photo.camera.requests==0);
  now=1100;photo.illumination_loop_();assert(photo.camera.requests==1&&photo.capture_stage_==1);photo.on_camera_image(img);assert(photo.frame_==0&&photo.flush_received_);
  photo.illumination_loop_();assert(photo.camera.requests==2&&photo.capture_pending_);photo.on_camera_image(img);assert(photo.frame_==1&&!photo.capture_pending_&&!lamp.on);
+ MeterSetup live;live.illumination_=&lamp;live.load_();live.live_=true;live.begin_capture_(false);now+=1000;live.illumination_loop_();live.on_camera_image(img);live.illumination_loop_();live.on_camera_image(img);assert(live.live_streaming_&&live.camera.streams==1&&lamp.on&&!live.capture_pending_);live.on_camera_image(img);assert(live.camera.streams==1&&live.frame_==2);
  MeterSetup reading;reading.illumination_=&lamp;reading.load_();reading.busy_=true;reading.begin_capture_(true);assert(!reading.accepts_reader_frame_());
  now+=1000;reading.illumination_loop_();reading.on_camera_image(img);reading.illumination_loop_();assert(reading.reader.updates==1&&reading.reader.arms==1&&reading.accepts_reader_frame_()&&lamp.on);
  MeterSetup timeout;timeout.illumination_=&lamp;timeout.load_();timeout.busy_=true;timeout.begin_capture_(true);now+=15001;timeout.illumination_loop_();assert(!lamp.on&&!timeout.busy_&&!timeout.capture_pending_&&timeout.reading_problem_&&timeout.reader.updates==0);

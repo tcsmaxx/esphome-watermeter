@@ -180,7 +180,12 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint32_t displayed_frame_{0}, reference_revision_{0}, alignment_ms_{0};
   AlignmentMatch alignment_matches_[2]{};
   std::string alignment_result_{"Ausgeschaltet"};
-  std::mutex mutex_;
+  void update_status_();
+  void stop_live_();
+  void live_loop_(bool start,bool stop);
+  bool live_{false},live_streaming_{false},live_was_paused_{true};
+  uint32_t live_deadline_{0},live_last_frame_{0},live_frame_at_{0};
+  std::mutex mutex_,status_mutex_;
   std::shared_ptr<uint8_t> jpeg_;
   size_t jpeg_size_{0};
   std::string message_{"Noch nicht eingerichtet"};
@@ -190,7 +195,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
   float confidence_{0};
   bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
-  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE, POWER_SAVE } command_{NONE};
+  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE, POWER_SAVE, LIVE_START, LIVE_STOP } command_{NONE};
   bool paused_{true};
 };
 class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {
