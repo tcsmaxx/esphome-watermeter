@@ -36,6 +36,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional('confidence_6', default={'name': 'Konfidenz Stelle 6'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
     cv.Optional('confidence_7', default={'name': 'Konfidenz Stelle 7'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
     cv.Optional('confidence_8', default={'name': 'Konfidenz Stelle 8'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
+    cv.Optional('confidence_9', default={'name': 'Konfidenz Stelle 9'}): sensor.sensor_schema(unit_of_measurement='%', accuracy_decimals=1, entity_category='diagnostic'),
     cv.Optional('problem', default={'name': 'Ableseproblem'}): binary_sensor.binary_sensor_schema(device_class='problem'),
 
 }).extend(cv.COMPONENT_SCHEMA)
@@ -96,5 +97,5 @@ async def to_code(config):
     cg.add(var.set_reading_age(await sensor.new_sensor(config['reading_age'])))
     cg.add(var.set_stale(await binary_sensor.new_binary_sensor(config['stale'])))
     cg.add(var.set_confidence(await sensor.new_sensor(config['confidence'])))
-    for i in range(8):
+    for i in range(9):
         cg.add(var.set_digit_confidence(i, await sensor.new_sensor(config[f'confidence_{i+1}'])))

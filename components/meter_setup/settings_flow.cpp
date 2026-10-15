@@ -26,7 +26,8 @@ bool MeterSetup::parse_options_(AsyncWebServerRequest *r,bool power) {
 }
 bool MeterSetup::save_all_() {
   ++save_attempt_;save_ok_=false;
-  const bool baseline_changed=settings_.baseline!=pending_.baseline||settings_.calibrated!=pending_.calibrated;
+  const bool layout_changed=settings_.digit_count!=pending_.digit_count||settings_.decimals!=pending_.decimals;
+  const bool baseline_changed=settings_.baseline!=pending_.baseline||settings_.calibrated!=pending_.calibrated||settings_.digit_count!=pending_.digit_count||settings_.decimals!=pending_.decimals;
   auto options=runtime_;options.warning_after=pending_warning_after_;if(baseline_changed)options.last_valid_epoch=0;
   AutofocusSettings focus;focus.before_reading=pending_autofocus_;focus.manual_enabled=pending_manual_focus_;focus.position=pending_focus_position_;
   const bool old_standby=camera_power_.standby_enabled(),old_weak=camera_power_.weak_drive();
@@ -46,10 +47,14 @@ bool MeterSetup::save_all_() {
   }
   settings_=pending_;alignment_=draft_alignment_=pending_alignment_;runtime_=options;autofocus_settings_=focus;
   illumination_settings_=pending_illumination_;
+  if(layout_changed){if(confidence_sensor_)confidence_sensor_->publish_state(NAN);for(int i=0;i<MAX_DIGITS;i++)if(digit_sensors_[i])digit_sensors_[i]->publish_state(NAN);digits_.clear();confidence_digits_.clear();confidence_=0;for(auto &value:digit_confidences_)value=NAN;preview_.reset();preview_size_=0;inference_jpeg_.reset();inference_jpeg_size_=0;}
+
   if(baseline_changed){have_previous_reading_=false;runtime_.last_valid_epoch=0;if(change_)change_->publish_state(NAN);if(flow_)flow_->publish_state(NAN);}
   if(settings_.calibrated){
-    std::string zones="[";for(int i=0;i<8;i++){if(i)zones+=',';zones+='[';for(int j=0;j<4;j++){if(j)zones+=',';zones+=std::to_string(settings_.boxes[i][j]);}zones+=']';}zones+=']';reader_->set_crop_zones(zones);
+    std::string zones="[";for(int i=0;i<settings_.digit_count;i++){if(i)zones+=',';zones+='[';for(int j=0;j<4;j++){if(j)zones+=',';zones+=std::to_string(settings_.boxes[i][j]);}zones+=']';}zones+=']';reader_->set_crop_zones(zones);
   }else paused_=true;
+  mqtt_discovered_=false;mqtt_discovery_index_=0;mqtt_state_at_=0;
+  for(int i=settings_.digit_count;i<MAX_DIGITS;i++)if(digit_sensors_[i])digit_sensors_[i]->publish_state(NAN);
   next_=millis()+settings_.interval*1000;
   save_ok_=true;++config_revision_;build_export_();
   message_=settings_.calibrated?"Alle Einstellungen gespeichert":"Alle Einstellungen als Entwurf gespeichert · Ziffernrahmen und Zählerstand ergänzen";

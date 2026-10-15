@@ -45,6 +45,7 @@ struct Text {std::vector<std::string> states; void publish_state(const std::stri
 struct Binary {bool state=false; void publish_state(bool value){state=value;} };
 class MeterSetup {
  public:
+ uint8_t result_decimals_=3;
   Reader reader; Reader *reader_=&reader;
   Value value; Value *value_=&value;
   Value changes,flows; Value *change_=&changes,*flow_=&flows;
@@ -54,7 +55,7 @@ class MeterSetup {
   uint32_t last_accepted_at_=0;
   bool have_previous_reading_=false,reading_problem_=false;
   RuntimeSettings runtime_{};bool stale_=false;struct RuntimePref {bool save(RuntimeSettings*){return true;}}runtime_preference_;
-  bool confidence_pending_=false;uint32_t confidence_finished_at_=0;float digit_confidences_[8]{};std::string confidence_digits_;Value *confidence_sensor_=nullptr,*digit_sensors_[8]{};
+  bool confidence_pending_=false;uint32_t confidence_finished_at_=0;float digit_confidences_[9]{};std::string confidence_digits_;Value *confidence_sensor_=nullptr,*digit_sensors_[9]{};
   void build_export_(){}
   std::string reading_error_,last_reader_log_;
   RecoveryRecord recovery_{};struct RecoveryPref{bool save(RecoveryRecord*){return true;}} recovery_preference_;
@@ -162,6 +163,10 @@ int main() {
   globals.success=false;failed.reset_();
   assert(failed.settings_.calibrated && failed.settings_.baseline==123456 && failed.reset_count_==0);
   assert(failed.preference_.stored.settings.baseline==123456 && failed.value.states.empty());
+  globals.success=true;
+  for(int count=1;count<=9;count++){MeterSetup meter;meter.test_=false;meter.settings_.digit_count=count;meter.settings_.decimals=std::min(3,count-1);meter.settings_.baseline=8;const std::string n=std::string(count-1,'0')+'9';meter.result_("Reading: "+n+" -> 9 (valid: yes, confidence: 99.0%)");assert(meter.accepted_&&meter.settings_.baseline==9&&meter.value.states.size()==1&&meter.result_decimals_==meter.settings_.decimals);}
+  MeterSetup trial;trial.pending_.digit_count=7;trial.pending_.decimals=2;trial.result_("Reading: 0123456 -> 123456 (valid: yes, confidence: 99.0%)");assert(trial.result_decimals_==2&&trial.value.states.empty()&&trial.message_.find("Test erkannt")!=std::string::npos);
+  MeterSetup wrong_length;wrong_length.test_=false;wrong_length.settings_.digit_count=7;wrong_length.result_("Reading: 00123456 -> 123456 (valid: yes, confidence: 99.0%)");assert(!wrong_length.accepted_&&wrong_length.value.states.empty());
   std::cout<<"Result flow tests passed: unsaved/saved ROI restore, test isolation, publish/reject, persistent reset and rollback\n";
 }
 '''

@@ -8,7 +8,7 @@ const {chromium} = require('playwright');
  const browser=await chromium.launch({...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),headless:true,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:800,height:1000}});
  let rejectSave=null;let snapshotDelay=1600,captureBusyReplies=0,statusRequests=0;let captureDelay=0;let rawPreview=null;let confirmReset=false;const errors=[],posts=[],dialogs=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());if(d.type()==='confirm'&&confirmReset)await d.accept();else await d.dismiss()});
- const state={rotation_tenths:0,camera_standby_available:true,camera_standby_enabled:true,camera_weak_drive:false,camera_power_status:'Sensor im Software-Standby',autofocus_available:true,autofocus_before_reading:true,autofocus_status:'Bereit · noch nicht fokussiert',autofocus_error:0,boxes:Array.from({length:8},()=>[0,0,0,0]),decimals:3,interval:60,max_step:1000,baseline:0,reset_count:0,calibrated:false,busy:false,paused:true,frame:7,digits:'',confidence:0,message:'Noch nicht eingerichtet',illumination_available:true,illumination_led_count:8,illumination_led_capacity:64,illumination_enabled:false,illumination_brightness:30,illumination_settle_ms:1000,illumination_on:false,light_test:false,alignment_enabled:false,references:Array.from({length:2},()=>[0,0,0,0]),reference_ready:false,alignment_ms:0,alignment_result:'Ausgeschaltet',preview_available:false,preview_sequence:0,preview_corrected:false,warning_after:300,config_revision:0,reading_age:null,stale:false,digit_confidences:[]};
+ const state={digit_count:8,rotation_tenths:0,camera_standby_available:true,camera_standby_enabled:true,camera_weak_drive:false,camera_power_status:'Sensor im Software-Standby',autofocus_available:true,autofocus_before_reading:true,autofocus_status:'Bereit · noch nicht fokussiert',autofocus_error:0,boxes:Array.from({length:8},()=>[0,0,0,0]),decimals:3,interval:60,max_step:1000,baseline:0,reset_count:0,calibrated:false,busy:false,paused:true,frame:7,digits:'',confidence:0,message:'Noch nicht eingerichtet',illumination_available:true,illumination_led_count:8,illumination_led_capacity:64,illumination_enabled:false,illumination_brightness:30,illumination_settle_ms:1000,illumination_on:false,light_test:false,alignment_enabled:false,references:Array.from({length:2},()=>[0,0,0,0]),reference_ready:false,alignment_ms:0,alignment_result:'Ausgeschaltet',preview_available:false,preview_sequence:0,preview_corrected:false,warning_after:300,config_revision:0,reading_age:null,stale:false,digit_confidences:[]};
  await page.route('http://meter.test/**',async route=>{
   const wireURL=new URL(route.request().url()),u=new URL(wireURL);
   if(route.request().method()==='POST'&&route.request().postData()&&u.pathname!=='/meter/import'){
@@ -40,13 +40,14 @@ const {chromium} = require('playwright');
   if(u.pathname==='/meter/preview'){if(captureDelay)await new Promise(r=>setTimeout(r,captureDelay));state.frame++;state.message='Kamerabild aufgenommen';state.autofocus_status=u.searchParams.get('focus_mode')==='manual'?'Manuell eingestellt':'Fokus gefunden';}
   if(u.pathname==='/meter/save_all'){
    state.rotation_tenths=Number(u.searchParams.get('rotation'));state.save_attempt=(state.save_attempt||0)+1;state.save_ok=true;state.config_revision++;state.alignment_enabled=u.searchParams.get('alignment')==='1';
-   state.boxes=Array.from({length:8},(_,i)=>u.searchParams.get('boxes').split(',').slice(i*4,i*4+4).map(Number));
-   if(u.searchParams.get('baseline_changed')==='1'){state.baseline=Number(u.searchParams.get('baseline'));state.calibrated=true;}
+   if(state.digit_count!==Number(u.searchParams.get('digit_count')))state.digits='';state.digit_count=Number(u.searchParams.get('digit_count'));state.decimals=Number(u.searchParams.get('decimals'));
+   state.boxes=Array.from({length:state.digit_count},(_,i)=>u.searchParams.get('boxes').split(',').slice(i*4,i*4+4).map(Number));
+   if(u.searchParams.get('baseline_changed')==='1'){state.baseline=Number(u.searchParams.get('baseline'));state.calibrated=u.searchParams.get('baseline_provided')==='1'&&state.boxes.every(b=>b[0]<b[2]&&b[1]<b[3]);}
    state.autofocus_before_reading=u.searchParams.get('focus_mode')==='auto';state.manual_focus_enabled=!state.autofocus_before_reading;state.manual_focus_position=Number(u.searchParams.get('position'));
    state.camera_standby_enabled=u.searchParams.get('standby')==='1';state.camera_weak_drive=u.searchParams.get('weak_drive')==='1';
    state.illumination_led_count=Number(u.searchParams.get('led_count'));state.illumination_enabled=u.searchParams.get('enabled')==='1';state.illumination_brightness=Number(u.searchParams.get('brightness'));state.illumination_settle_ms=Number(u.searchParams.get('settle_ms'));
   }
-  if(u.pathname==='/meter/reset'){state.rotation_tenths=0;state.reset_count++;state.boxes=Array.from({length:8},()=>[0,0,0,0]);state.digits='';state.calibrated=false;state.message='Zählerkonfiguration gelöscht'}
+  if(u.pathname==='/meter/reset'){state.digit_count=8;state.decimals=3;state.rotation_tenths=0;state.reset_count++;state.boxes=Array.from({length:8},()=>[0,0,0,0]);state.digits='';state.calibrated=false;state.message='Zählerkonfiguration gelöscht'}
   return route.fulfill({status:200,body:'Aktion vorgemerkt'});
  });
  await page.goto('http://meter.test/setup');await page.waitForFunction(()=>document.getElementById('message').textContent.includes('Noch nicht'));
@@ -132,6 +133,23 @@ const {chromium} = require('playwright');
  await page.click('#save');await page.waitForFunction(()=>!activeAction&&document.getElementById('save_state').textContent.includes('Gespeichert'));assert.equal(state.rotation_tenths,901);
  assert.equal(Number(posts.filter(p=>p.url.pathname==='/meter/save_all').at(-1).url.searchParams.get('rotation')),901);
  await page.reload();await page.waitForFunction(()=>loaded);assert.equal(await page.inputValue('#rotation'),'90.1');
+ // Variable meter layouts affect every setup control and persist across reloads.
+ confirmReset=true;await page.fill('#digit_count','7');await page.press('#digit_count','Tab');await page.waitForFunction(()=>digitCount===7);
+ assert.equal(await page.locator('#crops .crop').count(),7);assert.equal(await page.locator('#digit option').count(),9);assert.equal(await page.getAttribute('#baseline','maxlength'),'7');assert((await page.textContent('#digit_help')).includes('4 ganze und 3 Nachkommastellen'));
+ await page.evaluate(()=>{boxes[0]=[80,100,560,150];draw()});await page.click('#split');assert.equal(await page.evaluate(()=>boxes.length),7);
+ await page.fill('#baseline','0123456');await page.click('#save');await page.waitForFunction(()=>!activeAction&&!dirty);assert.equal(state.digit_count,7);assert.equal(state.boxes.length,7);assert.equal(state.baseline,123456);
+ const seven=posts.filter(p=>p.url.pathname==='/meter/save_all').at(-1);assert.equal(seven.url.searchParams.get('boxes').split(',').length,28);
+ state.digits='0123456';state.confidence=99;state.result_decimals=3;await page.waitForFunction(()=>document.getElementById('digits').textContent==='0123,456 m³');
+ state.result_decimals=2;await page.waitForFunction(()=>document.getElementById('digits').textContent==='01234,56 m³');state.result_decimals=3;
+ await page.check('#alignment');await page.selectOption('#digit','7');await page.evaluate(()=>changeBox(100,250,32,32));assert.deepEqual(await page.evaluate(()=>references[0]),[100,250,132,282]);await page.uncheck('#alignment');
+ state.preview_available=true;state.preview_sequence++;state.preview_corrected=true;await page.waitForFunction(()=>previewAvailable);await page.selectOption('#view','processed');await page.waitForFunction(()=>processedReady);assert.equal(await page.locator('#crops .crop').count(),7);await page.selectOption('#view','raw');
+ await page.fill('#digit_count','9');await page.press('#digit_count','Tab');await page.waitForFunction(()=>digitCount===9);assert.equal(await page.locator('#crops .crop').count(),9);assert.equal(await page.locator('#digit option').count(),11);
+ await page.evaluate(()=>{boxes[0]=[80,100,560,150];draw()});await page.click('#split');await page.fill('#baseline','999999999');await page.click('#save');await page.waitForFunction(()=>!activeAction&&!dirty);assert.equal(state.digit_count,9);assert.equal(state.boxes.length,9);assert.equal(state.baseline,999999999);
+ await page.reload();await page.waitForFunction(()=>loaded);assert.equal(await page.inputValue('#digit_count'),'9');assert.equal(await page.inputValue('#baseline'),'999999999');
+ await page.fill('#digit_count','1');await page.press('#digit_count','Tab');await page.waitForFunction(()=>digitCount===1);assert.equal(await page.inputValue('#decimals'),'0');assert.equal(await page.locator('#crops .crop').count(),1);
+ await page.click('#save');await page.waitForFunction(()=>!activeAction&&!dirty);assert.equal(state.calibrated,false,'Saving an empty baseline must remain a draft, including one-digit meters');
+ await page.fill('#baseline','9');await page.click('#save');await page.waitForFunction(()=>!activeAction&&!dirty);assert.equal(state.digit_count,1);assert.equal(state.calibrated,true);assert.equal(state.baseline,9);
+ await page.reload();await page.waitForFunction(()=>loaded);assert.equal(await page.inputValue('#digit_count'),'1');assert.equal(await page.locator('#digit option').count(),3);confirmReset=false;
  await page.click('#reset');assert(!posts.some(p=>p.url.pathname==='/meter/reset'));confirmReset=true;
  await page.click('#reset');await page.waitForFunction(()=>boxes.every(b=>b.every(v=>v===0))&&document.getElementById('baseline').value==='');assert(posts.some(p=>p.url.pathname==='/meter/reset'));assert.equal(await page.inputValue('#baseline'),'');
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);

@@ -102,7 +102,7 @@ std::shared_ptr<camera::CameraImage> MeterSetup::align_image_(const std::shared_
   auto transform=alignment_transform(active_alignment_,alignment_matches_[0],alignment_matches_[1]);
   if(error.empty() && !transform.valid) error="Drehung/Abstand der Referenzen außerhalb der Grenzen";
   const auto &boxes=test_?pending_.boxes:settings_.boxes;
-  if(error.empty()) for(const auto &box:boxes) if(!alignment_covers_box(transform,box)) {error="Ziffernrahmen liegt nach Ausrichtung außerhalb des Bildes";break;}
+  if(error.empty()) for(int i=0;i<(test_?pending_:settings_).digit_count;i++) if(!alignment_covers_box(transform,boxes[i])) {error="Ziffernrahmen liegt nach Ausrichtung außerhalb des Bildes";break;}
   ImageBuffer corrected;
   if(error.empty()) {
     auto *data=static_cast<uint8_t *>(heap_caps_malloc(640*480*3,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
@@ -146,7 +146,7 @@ static std::string quote(const std::string &s) {
   return out + '"';
 }
 int MeterSetup::invalid_box_(const Settings &s) {
-  for(int i=0;i<8;i++) {
+  for(int i=0;i<s.digit_count;i++) {
     const auto &b=s.boxes[i];
     if(b[0]>=b[2] || b[1]>=b[3] || b[2]>640 || b[3]>480) return i;
     // Compare centers: small overlaps are valid when tuning individual crops.
@@ -155,38 +155,40 @@ int MeterSetup::invalid_box_(const Settings &s) {
   return -1;
 }
 bool MeterSetup::valid_(const Settings &s) {
-  return s.version==1 && s.rotation_tenths>=-1800 && s.rotation_tenths<=1800 && s.decimals<=6 && s.interval>=10 && s.interval<=86400 &&
-    s.baseline<=99999999 && s.max_step>=1 && s.max_step<=99999999 && invalid_box_(s)<0;
+  return s.version==2 && s.digit_count>=1 && s.digit_count<=MAX_DIGITS && s.decimals<s.digit_count && s.rotation_tenths>=-1800 && s.rotation_tenths<=1800 && s.decimals<=6 && s.interval>=10 && s.interval<=86400 &&
+    s.baseline<=maximum_reading(s.digit_count) && s.max_step>=1 && s.max_step<=999999999 && invalid_box_(s)<0;
 }
 bool MeterSetup::valid_draft_(const Settings &s) {
-  if(s.version!=1||s.rotation_tenths < -1800||s.rotation_tenths>1800||s.decimals>6||s.interval<10||s.interval>86400||s.baseline>99999999||s.max_step<1||s.max_step>99999999)return false;
-  for(const auto &b:s.boxes){if(!b[0]&&!b[1]&&!b[2]&&!b[3])continue;if(b[0]>=b[2]||b[1]>=b[3]||b[2]>640||b[3]>480)return false;}
+  if(s.version!=2||s.digit_count<1||s.digit_count>MAX_DIGITS||s.decimals>=s.digit_count||s.rotation_tenths < -1800||s.rotation_tenths>1800||s.decimals>6||s.interval<10||s.interval>86400||s.baseline>maximum_reading(s.digit_count)||s.max_step<1||s.max_step>999999999)return false;
+  for(int i=0;i<s.digit_count;i++){const auto &b=s.boxes[i];if(!b[0]&&!b[1]&&!b[2]&&!b[3])continue;if(b[0]>=b[2]||b[1]>=b[3]||b[2]>640||b[3]>480)return false;}
   return true;
 }
 static std::string zones(const Settings &s) {
   std::string out="["; char b[64];
-  for(int i=0;i<8;i++){snprintf(b,sizeof(b),"%s[%u,%u,%u,%u]",i?",":"",s.boxes[i][0],s.boxes[i][1],s.boxes[i][2],s.boxes[i][3]);out+=b;}
+  for(int i=0;i<s.digit_count;i++){snprintf(b,sizeof(b),"%s[%u,%u,%u,%u]",i?",":"",s.boxes[i][0],s.boxes[i][1],s.boxes[i][2],s.boxes[i][3]);out+=b;}
   return out+"]";
 }
 void MeterSetup::setup() {
   reader_->stop_poller(); reader_->set_pause_processing(true);
-  preference_=global_preferences->make_preference<Configuration>(0x7a32b903);
+  preference_=global_preferences->make_preference<Configuration>(0x7a32b90b);
   Configuration loaded;
-  const bool have_new=preference_.load(&loaded);
-  // Version 1 used these two fields as padding; never interpret old padding as angles.
-  if(have_new && loaded.version==1){loaded.settings.rotation_tenths=0;loaded.alignment.rotation_tenths=0;}
-  if(have_new && (loaded.version==1||loaded.version==2) && valid_draft_(loaded.settings) && (!loaded.settings.calibrated || valid_(loaded.settings))) {
+  bool have_new=preference_.load(&loaded);
+  if(!have_new) {
+    auto prior=global_preferences->make_preference<LegacyConfiguration>(0x7a32b903);LegacyConfiguration old;
+    if(prior.load(&old) && (old.version==1||old.version==2) && old.settings.version==1) {
+      if(old.version==1){old.settings.rotation_tenths=0;old.alignment.rotation_tenths=0;}
+      loaded.settings=upgrade_settings(old.settings);loaded.alignment=old.alignment;have_new=true;
+    } else {
+      auto legacy=global_preferences->make_preference<LegacySettings>(0x7a32b901);LegacySettings previous;
+      if(legacy.load(&previous)&&previous.version==1&&previous.calibrated){previous.rotation_tenths=0;loaded.settings=upgrade_settings(previous);have_new=true;}
+    }
+    if(have_new && valid_draft_(loaded.settings) && (!loaded.settings.calibrated||valid_(loaded.settings))){preference_.save(&loaded);global_preferences->sync();}
+  }
+  if(have_new && loaded.version==3 && valid_draft_(loaded.settings) && (!loaded.settings.calibrated || valid_(loaded.settings))) {
     settings_=loaded.settings;alignment_=loaded.alignment;
     if(alignment_.enabled && (!alignment_.ready || !valid_reference_regions(alignment_) || alignment_.rotation_tenths!=settings_.rotation_tenths)) {paused_=true;reading_problem_=true;reading_error_="Ausrichtungsreferenzen ungültig; neu einrichten";message_=reading_error_;}
     else {paused_=!settings_.calibrated;message_=paused_?"Entwurf geladen; Ziffernrahmen und Zählerstand ergänzen":"Konfiguration geladen";}
     if(settings_.calibrated)reader_->set_crop_zones(zones(settings_));
-  } else if(!have_new) {
-    auto legacy=global_preferences->make_preference<Settings>(0x7a32b901);Settings previous;
-    const bool have_previous=legacy.load(&previous);previous.rotation_tenths=0;
-    if(have_previous && previous.calibrated && valid_(previous)) {
-      settings_=previous;paused_=false;message_="Vorhandene Konfiguration übernommen";
-      reader_->set_crop_zones(zones(settings_));save_configuration_(settings_,alignment_,true);
-    }
   }
   draft_alignment_=alignment_;
   illumination_preference_=global_preferences->make_preference<IlluminationSettings>(0x7a32b906);
@@ -455,11 +457,12 @@ void MeterSetup::result_(const std::string &s) {
   reader_->set_pause_processing(true);inference_started_=false;
   set_illumination_(light_test_,pending_illumination_);
   uint32_t raw=0;
-  bool ok=parse_reading(s,digits_,confidence_,raw);
+  result_decimals_=(test_?pending_:settings_).decimals;
+  bool ok=parse_reading(s,digits_,confidence_,raw,(test_?pending_:settings_).digit_count);
   if(timed_out_) { message_="Verspätetes Ergebnis verworfen; bitte neu starten"; return; }
   confidence_finished_at_=millis();confidence_pending_=confidence_digits_!=digits_;
   if(confidence_sensor_)confidence_sensor_->publish_state(confidence_);
-  for(int i=0;i<8;i++)if(digit_sensors_[i])digit_sensors_[i]->publish_state(confidence_digits_==digits_?digit_confidences_[i]:NAN);
+  for(int i=0;i<MAX_DIGITS;i++)if(digit_sensors_[i])digit_sensors_[i]->publish_state(i<settings_.digit_count&&confidence_digits_==digits_?digit_confidences_[i]:NAN);
   if(test_) message_=ok?"Test erkannt; noch nicht an Home Assistant übertragen":"Test unsicher; Rahmen/Beleuchtung prüfen";
   else {
     if(!ok) message_="Abgewiesen: KI-Erkennung unsicher oder ungültig";
@@ -523,7 +526,9 @@ std::string MeterSetup::status_() {
   out+=",\"stale\":";out+=stale_?"true":"false";
   out+=",\"config_revision\":";out+=std::to_string(config_revision_);
   out+=",\"digit_confidences\":[";
-  for(int i=0;i<8;i++){if(i)out+=',';out+=confidence_digits_==digits_&&std::isfinite(digit_confidences_[i])?std::to_string(int(digit_confidences_[i]*10+0.5f)/10.0f):"null";}out+=']';
+  for(size_t i=0;i<(digits_.empty()||digits_.size()>MAX_DIGITS?settings_.digit_count:digits_.size());i++){if(i)out+=',';out+=confidence_digits_==digits_&&std::isfinite(digit_confidences_[i])?std::to_string(int(digit_confidences_[i]*10+0.5f)/10.0f):"null";}out+=']';
+  out+=",\"result_decimals\":";out+=std::to_string(result_decimals_);
+  out+=",\"digit_count\":";out+=std::to_string(settings_.digit_count);
   out+=",\"decimals\":"; out+=std::to_string(settings_.decimals);
   out+=",\"interval\":"; out+=std::to_string(settings_.interval);
   out+=",\"baseline\":"; out+=std::to_string(settings_.baseline);
@@ -646,11 +651,11 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   if(url=="/meter/processed" && r->method()==HTTP_GET) {
     if(!preview_) {r->send(503,"text/plain; charset=utf-8","Kein gültiges KI-Bild; Rahmen testen und Ausrichtungsstatus prüfen");return;}
     auto image=preview_;const auto size=preview_size_;const bool rgb=preview_rgb_;
-    const auto sequence=preview_sequence_;const auto boxes=preview_boxes_,references=preview_references_;
+    const auto sequence=preview_sequence_;const auto boxes=preview_boxes_,references=preview_references_;const auto decimals=preview_decimals_;
     guard.unlock();
     auto *response=r->beginResponse(200,rgb?"application/octet-stream":"image/jpeg",image.get(),size);
     response->addHeader("Cache-Control","no-store");response->addHeader("X-Meter-Image",std::to_string(sequence).c_str());
-    response->addHeader("X-Meter-Boxes",boxes.c_str());response->addHeader("X-Meter-References",references.c_str());
+    response->addHeader("X-Meter-Boxes",boxes.c_str());response->addHeader("X-Meter-References",references.c_str());response->addHeader("X-Meter-Decimals",std::to_string(decimals).c_str());
     r->send(response);return;
   }
   if(url=="/meter/snapshot" && r->method()==HTTP_GET) {
@@ -768,18 +773,23 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   else if(url=="/meter/pause") command_=PAUSE;
   else if(url=="/meter/resume") command_=RESUME;
   else if(url=="/meter/save" || url=="/meter/test" || url=="/meter/save_all") {
-    Settings candidate=settings_;candidate.rotation_tenths=pending_.rotation_tenths; int values[32];
-    if(!r->hasParam("boxes") || r->getParam("boxes")->value().size()>256) {r->send(400,"text/plain","32 Koordinaten erforderlich");return;}
-    std::string input=r->getParam("boxes")->value(); const char *p=input.c_str();
-    for(int i=0;i<32;i++) {
-      char *end=nullptr; long v=std::strtol(p,&end,10);
-      if(end==p || v<0 || v>640 || (i<31 && *end!=',') || (i==31 && *end!='\0')) {r->send(400,"text/plain","Ungültige Koordinaten");return;}
-      values[i]=v; p=end+(i<31?1:0);
+    Settings candidate=settings_;candidate.rotation_tenths=pending_.rotation_tenths;
+    if(r->hasParam("digit_count")){
+      const auto v=r->getParam("digit_count")->value();if(v.size()!=1||v[0]<'1'||v[0]>'9'){r->send(400,"text/plain","Ziffernanzahl: 1 bis 9");return;}candidate.digit_count=v[0]-'0';
     }
-    for(int i=0;i<32;i++) candidate.boxes[i/4][i%4]=values[i];
+    const int coordinates=candidate.digit_count*4;int values[MAX_DIGITS*4]{};
+    if(!r->hasParam("boxes") || r->getParam("boxes")->value().size()>256) {r->send(400,"text/plain","Vier Koordinaten je Ziffer erforderlich");return;}
+    std::string input=r->getParam("boxes")->value(); const char *p=input.c_str();
+    for(int i=0;i<coordinates;i++) {
+      char *end=nullptr; long v=std::strtol(p,&end,10);
+      if(end==p || v<0 || v>640 || (i<coordinates-1 && *end!=',') || (i==coordinates-1 && *end!='\0')) {r->send(400,"text/plain","Ungültige Koordinaten");return;}
+      values[i]=v; p=end+(i<coordinates-1?1:0);
+    }
+    std::memset(candidate.boxes,0,sizeof(candidate.boxes));
+    for(int i=0;i<coordinates;i++) candidate.boxes[i/4][i%4]=values[i];
     auto number=[r](const char *name,uint32_t &value)->bool {
       if(!r->hasParam(name)) return false; const auto &s=r->getParam(name)->value();
-      if(s.empty() || s.size()>8 || s.find_first_not_of("0123456789")!=std::string::npos) return false;
+      if(s.empty() || s.size()>9 || s.find_first_not_of("0123456789")!=std::string::npos) return false;
       value=std::strtoul(s.c_str(),nullptr,10);return true;
     };
     uint32_t decimals;
@@ -788,7 +798,8 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     if(url=="/meter/save_all"){
       const bool baseline_changed=r->hasParam("baseline_changed")&&r->getParam("baseline_changed")->value()=="1";
       if(!baseline_changed)candidate.baseline=settings_.baseline;
-      candidate.calibrated=valid_(candidate)&&(settings_.calibrated||baseline_changed);
+      const bool baseline_provided=r->hasParam("baseline_provided")?r->getParam("baseline_provided")->value()=="1":r->getParam("baseline")->value().size()==candidate.digit_count;
+      candidate.calibrated=valid_(candidate)&&(baseline_changed?baseline_provided:(settings_.calibrated&&settings_.digit_count==candidate.digit_count));
       if(!valid_draft_(candidate)){r->send(400,"text/plain","Ungültiger Rahmen oder Ableseeinstellung");return;}
       pending_=candidate;command_=SAVE_ALL;r->send(200,"text/plain","Alle Einstellungen werden gespeichert");return;
     }
@@ -798,7 +809,7 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
         char error[160];
         snprintf(error,sizeof(error),"Rahmen %d: Breite/Höhe müssen positiv sein, innerhalb 640×480 liegen und die Mitte rechts vom vorherigen Rahmen stehen.",box+1);
         r->send(400,"text/plain; charset=utf-8",error);
-      } else r->send(400,"text/plain; charset=utf-8","Intervall: 10–86400 Sekunden; max. Sprung: 1–99999999; Stand: acht Ziffern.");
+      } else r->send(400,"text/plain; charset=utf-8","Intervall: 10–86400 Sekunden; max. Sprung: 1–999999999; Stand und Nachkommastellen passend zur Ziffernanzahl.");
       return;
     }
     pending_=candidate; command_=url=="/meter/save"?SAVE:TEST;
@@ -808,7 +819,7 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   r->send(200,"text/plain","Aktion vorgemerkt");
 }
 void MeterSetup::set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,bool rgb) {
-  preview_=data;preview_size_=size;preview_rgb_=rgb;
+  preview_=data;preview_size_=size;preview_rgb_=rgb;preview_decimals_=(test_?pending_:settings_).decimals;
   preview_boxes_=zones(test_?pending_:settings_);
   preview_references_="[";
   for(int k=0;k<2;k++) {if(k)preview_references_+=',';preview_references_+='[';

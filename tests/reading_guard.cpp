@@ -12,5 +12,7 @@ int main() {
   assert(within_range(123456,123456,1000));assert(within_range(124456,123456,1000));
   assert(!within_range(123455,123456,1000));assert(!within_range(124457,123456,1000));
   assert(!within_range(0,99999999,1000));
+  for(int count=1;count<=9;count++){const std::string n(count,'9');assert(parse_reading("Reading: "+n+" -> 1000000000 (valid: yes, confidence: 99.0%)",digits,conf,raw,count));assert(raw==std::strtoul(n.c_str(),nullptr,10));assert(!parse_reading("Reading: "+n+" -> 0 (valid: yes, confidence: 99.0%)",digits,conf,raw,count==9?8:count+1));}
+  assert(!parse_reading("Reading: 9999999999 -> 0 (valid: yes, confidence: 99.0%)",digits,conf,raw,10));
   std::cout<<"Reading guard tests passed\n";
 }

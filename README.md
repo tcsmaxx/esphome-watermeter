@@ -33,7 +33,7 @@ Der Schwerpunkt liegt auf komfortabler Einrichtung und kontrollierter Veröffent
 | ESPHome-Board | `seeed_xiao_esp32s3` |
 | Framework | ESP-IDF |
 | Kamerabild | 640 × 480 Pixel, JPEG |
-| Zähler | Acht mechanische Ziffernrollen; typischerweise fünf schwarze und drei rote Stellen |
+| Zähler | 1–9 mechanische Ziffernrollen; Gesamtzahl und Nachkommastellen im Setup einstellbar |
 | Beleuchtung, optional | SK6812 RGBW, 5 V, Datenleitung D1 / GPIO2 |
 | Geprüfte Software | ESPHome 2026.9.1, ESP-IDF 5.5.5 |
 
@@ -56,11 +56,13 @@ Auf großen Bildschirmen stehen die Einstellungen links und das Kamerabild recht
 ### Ziffernrahmen und Kalibrierung
 
 1. **Pausieren** und mit **Neues Bild** einen Kameraschnappschuss aufnehmen. Unter **Bild gerade ausrichten** bei Bedarf zuerst mit den 90°-Tasten drehen und in 0,1°-Schritten nachjustieren. Danach Rahmen und Referenzen einzeichnen.
-2. Unter **Ausgewählte Stelle** eine Ziffer wählen und einen Rahmen um die vollständige Ziffer ziehen. Acht Rahmen von links nach rechts einrichten.
-3. Zum schnellen Verteilen zunächst für Stelle 1 die gesamte Ziffernreihe markieren und **8 Rahmen gleichmäßig verteilen** verwenden. Anschließend jede Stelle einzeln anpassen.
+2. Unter **Ausgewählte Stelle** eine Ziffer wählen und einen Rahmen um die vollständige Ziffer ziehen. Die gewählte Anzahl Rahmen von links nach rechts einrichten.
+3. Zum schnellen Verteilen zunächst für Stelle 1 die gesamte Ziffernreihe markieren und **Rahmen gleichmäßig verteilen** verwenden. Anschließend jede Stelle einzeln anpassen.
 4. **Rahmen testen** und alle erkannten Stellen mit dem Bild vergleichen.
-5. Den tatsächlichen Stand von Hand ablesen und als acht Ziffern ohne Komma eingeben: `00123,456 m³` entspricht `00123456`. Nachkommastellen, Ableseintervall und maximalen Sprung einstellen.
-6. **Speichern & Automatik starten** sichert die Konfiguration und aktiviert die regelmäßige Ablesung.
+5. Den tatsächlichen Stand von Hand ablesen und mit der eingestellten Ziffernanzahl ohne Komma eingeben: `00123,456 m³` entspricht `00123456`. Nachkommastellen, Ableseintervall und maximalen Sprung einstellen.
+6. **Alle Einstellungen speichern** sichert die Konfiguration; anschließend bei Bedarf **Fortsetzen** wählen.
+
+Unter **Ziffernrahmen** lässt sich **Ziffern insgesamt** von 1 bis 9 einstellen. Führende Nullen und Nachkommastellen werden mitgezählt. Die Zahl der Nachkommastellen ist kleiner als die Gesamtzahl und höchstens 6. Rahmenauswahl, gleichmäßige Verteilung, Ziffernausschnitte, Farben und Stand-Eingabe passen sich automatisch an. Beispiel: 7 Ziffern mit 3 Nachkommastellen ergeben `1234,567 m³`. Beim Ändern der Anzahl bleiben die ersten Rahmen erhalten; überzählige werden nach Bestätigung entfernt und zusätzliche Rahmen sind zunächst leer. Der aktuelle Stand muss danach neu eingegeben werden. Bestehende Konfigurationen und Sicherungen ohne Ziffernanzahl werden als 8 Stellen übernommen. Die beiden optionalen Referenzbereiche bleiben unabhängig davon.
 
 Die Bilddrehung wird mit **Alle Einstellungen speichern** dauerhaft übernommen und auch in Sicherungen exportiert. Vorschau, Ziffernausschnitte und Erkennung verwenden dieselbe Drehung. Das ganze Bild wird in die Arbeitsfläche von 640 × 480 Pixeln eingepasst; schwarze Ränder sind normal. Wird die Drehung nachträglich verändert, werden die eingezeichneten Rahmen und Referenzen nach Bestätigung im Entwurf geleert und müssen neu gesetzt werden. Die automatische Referenzausrichtung arbeitet anschließend auf dem gedrehten Bild. Das originale Kamerabild in Home Assistant und im MQTT-Bild bleibt unverändert.
 
@@ -91,7 +93,7 @@ Tests und abgewiesene Ergebnisse setzen den Zeitpunkt nicht zurück. Nach Neusta
 Automatische Ablesungen werden nur übernommen, wenn alle folgenden Bedingungen erfüllt sind:
 
 - Die KI meldet ein gültiges Ergebnis.
-- Das Ergebnis enthält genau acht gültige Ziffern.
+- Das Ergebnis enthält genau die eingestellte Anzahl gültiger Ziffern.
 - Die mittlere Konfidenz erreicht mindestens 90 %.
 - Der Stand ist mindestens so hoch wie der letzte akzeptierte Stand.
 - Der Zuwachs überschreitet die eingestellte Sprunggrenze nicht.
@@ -101,7 +103,9 @@ Die Plausibilitätsprüfung und die Speicherung verwenden Ganzzahl-Rohwerte. Fü
 
 Abgewiesene Ablesungen verändern den bestätigten Zählerstand nicht. Status und Fehlersensor geben den Ablehnungsgrund an. Nach längeren Unterbrechungen, einem Zählerwechsel oder einem tatsächlich größeren Verbrauch muss der aktuelle Stand gegebenenfalls manuell eingetragen werden.
 
-Die Gesamtkonfidenz ist der Mittelwert der Stellen, keine Garantie für jede einzelne Ziffer. Zusätzlich werden acht Einzelkonfidenzen unter den Ziffernausschnitten und als Diagnose-Sensoren angezeigt. Werte unter 90 % werden im Setup hervorgehoben; dies ist ein Hinweis und keine zusätzliche Ablehnungsgrenze. Die Einzelwerte stammen aus der Ergebnislogzeile der festgelegten KI-Basis. Dafür muss das Logger-Level für `meter_reader_tflite` mindestens `INFO` sein. Fehlende oder nicht zum Ergebnis passende Einzelwerte werden als unbekannt angezeigt. Auch ein plausibler OCR-Fehler kann die Prüfungen passieren. Halb umgeschaltete Rollen, Reflexionen und unscharfe Ausschnitte erfordern besondere Aufmerksamkeit.
+Die Vergleichsprüfung verwendet den ganzzahligen Rohwert einschließlich aller Stellen. Die native ESPHome-Sensorübertragung nutzt Gleitkommazahlen; bei sehr großen Zählerständen kann deren Auflösung die letzten Nachkommastellen begrenzen.
+
+Die Gesamtkonfidenz ist der Mittelwert der Stellen, keine Garantie für jede einzelne Ziffer. Zusätzlich werden die Einzelkonfidenzen der konfigurierten Stellen unter den Ziffernausschnitten und als Diagnose-Sensoren angezeigt. Werte unter 90 % werden im Setup hervorgehoben; dies ist ein Hinweis und keine zusätzliche Ablehnungsgrenze. Die Einzelwerte stammen aus der Ergebnislogzeile der festgelegten KI-Basis. Dafür muss das Logger-Level für `meter_reader_tflite` mindestens `INFO` sein. Fehlende oder nicht zum Ergebnis passende Einzelwerte werden als unbekannt angezeigt. Auch ein plausibler OCR-Fehler kann die Prüfungen passieren. Halb umgeschaltete Rollen, Reflexionen und unscharfe Ausschnitte erfordern besondere Aufmerksamkeit.
 
 Bei ausbleibendem Kamerabild wird die Aufnahme beendet und die automatische Beleuchtung ausgeschaltet. Liegt nach 60 Sekunden kein KI-Ergebnis vor, wird der aktuelle Auftrag gesperrt. Die Fehlerdiagnose wird dauerhaft gespeichert, das Licht ausgeschaltet und nach fünf Sekunden ein kontrollierter automatischer Neustart ausgeführt. So wird kein weiterer Auftrag mit einer möglicherweise noch laufenden Inferenz überlappt. Nach wiederholten Zeitüberschreitungen verlängert sich die Wartezeit bis zur ersten Ablesung auf 1, 2, 4, 8, 16 und maximal 30 Minuten; eine erfolgreiche Ablesung setzt diese Staffelung zurück. Fehlende oder uneindeutige Referenzen verwerfen ausschließlich die betreffende Ablesung und lösen keinen Neustart aus. Ein vom Reader gemeldeter Kamera-Timeout wird abgeschlossen und im eingestellten Intervall erneut versucht.
 
@@ -109,7 +113,7 @@ Bei ausbleibendem Kamerabild wird die Aufnahme beendet und die automatische Bele
 
 Die Bildausrichtung gleicht kleine Bewegungen zwischen Kamera und Zähler aus. Sie ist standardmäßig deaktiviert. Bei deaktivierter Ausrichtung geht das Kamerabild ohne Referenzkorrektur an die KI.
 
-1. Ein neues Bild aufnehmen und die acht Ziffernrahmen einrichten.
+1. Ein neues Bild aufnehmen und die Ziffernrahmen einrichten.
 2. **Ausrichtung mit Referenzen verwenden** aktivieren.
 3. Unter **Ausgewählte Stelle** die Einträge **Referenz 1** und **Referenz 2** wählen und zwei feste, kontrastreiche Merkmale markieren, etwa unterschiedliche Schriftzeichen, Schrauben oder Gehäusedetails. Bewegliche Ziffern und Zeiger sowie wiederholte oder gleichförmige Flächen eignen sich nicht.
 4. **Referenzen aus diesem Bild übernehmen** anklicken. Die Muster werden aus genau dem angezeigten Schnappschuss entnommen.
@@ -196,7 +200,7 @@ Der bestätigte **Zählerstand** wird in m³ mit Geräteklasse `water` und Zusta
 | Alter der letzten Ablesung | Sekunden seit letzter akzeptierter Ablesung |
 | Ablesung veraltet | Warnschwelle ohne neue gültige Ablesung überschritten |
 | Erkennungskonfidenz | Mittlere Konfidenz des letzten Erkennungsergebnisses |
-| Konfidenz Stelle 1–8 | Einzelkonfidenzen des letzten Erkennungsergebnisses |
+| Konfidenz je Stelle (1–9) | Einzelkonfidenzen des letzten Erkennungsergebnisses |
 
 Änderung und Durchfluss basieren ausschließlich auf akzeptierten automatischen Ablesungen. Der erste Durchfluss nach Start oder manueller Kalibrierung bleibt unbekannt, bis zwei akzeptierte Ablesungen vorliegen. Gleichbleibender Stand ergibt anschließend einen Durchfluss von null. Tests verändern keine Verbrauchswerte.
 
@@ -281,7 +285,7 @@ mqtt_username: "DEIN-MQTT-BENUTZER"
 mqtt_password: "DEIN-MQTT-PASSWORT"
 ```
 
-Das Paket aktiviert MQTT-Discovery. Die Wasserzähler-Komponente veröffentlicht 18 Mess- und Diagnoseentitäten ausdrücklich: Zählerstand, Änderung, Durchfluss, letzte Aktualisierung, Status, Fehler, Alter, Veraltet-Warnung, Gesamt- und acht Einzelkonfidenzen sowie Ableseproblem. Die retained JSON-Nachricht unter `${device_name}/meter/state` wird alle fünf Sekunden aktualisiert; Discovery wird nach einer erneuten Broker-Verbindung wiederholt. Weitere öffentliche ESPHome-Entitäten wie der Neustart-Button verwenden die native MQTT-Anbindung. Home Assistant benötigt eine MQTT-Integration mit Zugang zu diesem Broker und aktivierter Discovery. Stabile Gerätekennungen auf Basis der MAC-Adresse ordnen die Entitäten dem Gerät zu. Entitäts-IDs anschließend in der Dashboard-Karte anpassen. Verwenden API und MQTT dieselbe Home-Assistant-Instanz, können dort zusätzliche MQTT-Entitäten neben den API-Entitäten erscheinen.
+Das Paket aktiviert MQTT-Discovery. Die Wasserzähler-Komponente veröffentlicht die Mess- und Diagnoseentitäten ausdrücklich: Zählerstand, Änderung, Durchfluss, letzte Aktualisierung, Status, Fehler, Alter, Veraltet-Warnung, Gesamt- und die zur Ziffernanzahl passenden Einzelkonfidenzen sowie Ableseproblem. Nicht mehr verwendete Einzelkonfidenzen werden aus MQTT-Discovery entfernt. Die retained JSON-Nachricht unter `${device_name}/meter/state` wird alle fünf Sekunden aktualisiert; Discovery wird nach einer erneuten Broker-Verbindung wiederholt. Weitere öffentliche ESPHome-Entitäten wie der Neustart-Button verwenden die native MQTT-Anbindung. Home Assistant benötigt eine MQTT-Integration mit Zugang zu diesem Broker und aktivierter Discovery. Stabile Gerätekennungen auf Basis der MAC-Adresse ordnen die Entitäten dem Gerät zu. Entitäts-IDs anschließend in der Dashboard-Karte anpassen. Verwenden API und MQTT dieselbe Home-Assistant-Instanz, können dort zusätzliche MQTT-Entitäten neben den API-Entitäten erscheinen.
 
 Das Kamerabild in Home Assistant über die ESPHome-API und das MQTT-Bild enthalten unten links den Aufnahmezeitpunkt als weiße Schrift auf schwarzem Hintergrund, im Format `12.10.2026 13:45:39`. Die Zeit folgt der konfigurierten Zeitzone (im Beispiel `Europe/Berlin`, einschließlich Sommer-/Winterzeit). Ohne synchronisierte Uhr steht dort `--.--.---- --:--:--`. Die Einblendung wird ausschließlich in einer separaten Bildkopie für die Übertragung gezeichnet; KI, Rahmen, Referenzen und die Setup-/KI-Ansicht verwenden die unveränderten Aufnahmen. Die JPEG-Kopie wird mit Qualität 85 kodiert. Bei fehlendem Speicher oder einem Codecfehler wird das Rohbild übertragen.
 

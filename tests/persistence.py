@@ -35,22 +35,26 @@ class MeterSetup {
 };
 '''+save+validation+r'''
 int main(){
- Settings old;old.calibrated=1;old.baseline=1864266;for(int i=0;i<8;i++){old.boxes[i][0]=100+i*40;old.boxes[i][1]=100;old.boxes[i][2]=130+i*40;old.boxes[i][3]=150;}
- globals.make_preference<Settings>(0x7a32b901).save(&old);
- MeterSetup migrated;migrated.load_();assert(migrated.settings_.baseline==1864266&&!migrated.paused_&&!migrated.alignment_.enabled);assert(storage.count(0x7a32b903));
+ LegacySettings old;old.calibrated=1;old.baseline=1864266;for(int i=0;i<8;i++){old.boxes[i][0]=100+i*40;old.boxes[i][1]=100;old.boxes[i][2]=130+i*40;old.boxes[i][3]=150;}
+ globals.make_preference<LegacySettings>(0x7a32b901).save(&old);
+ MeterSetup migrated;migrated.load_();assert(migrated.settings_.baseline==1864266&&migrated.settings_.digit_count==8&&!migrated.paused_);assert(storage.count(0x7a32b90b));
  AlignmentReference refs;refs.enabled=refs.ready=1;uint16_t boxes[2][4]={{120,210,152,242},{480,210,512,242}};memcpy(refs.regions,boxes,sizeof(boxes));refs.pixels[1][42]=213;
- assert(migrated.save_configuration_(old,refs,true));MeterSetup reboot;reboot.load_();assert(!reboot.paused_&&reboot.settings_.baseline==old.baseline&&reboot.alignment_.pixels[1][42]==213&&reboot.draft_alignment_.ready);
- assert(reboot.save_configuration_(Settings{},AlignmentReference{},true));MeterSetup cleared;cleared.load_();assert(!cleared.settings_.calibrated&&cleared.paused_&&!cleared.alignment_.ready&&cleared.settings_.baseline==0); // Legacy key still exists but cannot resurrect after reset.
- refs.ready=0;migrated.save_configuration_(old,refs,true);MeterSetup corrupt;corrupt.load_();assert(corrupt.paused_&&corrupt.reading_problem_&&!corrupt.reading_error_.empty());
- Settings draft;draft.interval=120;draft.boxes[0][0]=10;draft.boxes[0][1]=20;draft.boxes[0][2]=40;draft.boxes[0][3]=60;migrated.save_configuration_(draft,AlignmentReference{},true);MeterSetup partial;partial.load_();assert(partial.paused_&&!partial.settings_.calibrated&&partial.settings_.interval==120&&partial.settings_.boxes[0][0]==10);
- static_assert(sizeof(Settings)==84);static_assert(sizeof(AlignmentReference)==536);static_assert(sizeof(Configuration)==624);
- Configuration v1;v1.version=1;v1.settings=old;v1.settings.rotation_tenths=12345;v1.alignment=refs;v1.alignment.ready=1;v1.alignment.rotation_tenths=-23456;
- globals.make_preference<Configuration>(0x7a32b903).save(&v1);MeterSetup padding;padding.load_();assert(padding.settings_.baseline==old.baseline&&!padding.paused_&&padding.settings_.rotation_tenths==0&&padding.alignment_.rotation_tenths==0);
- old.rotation_tenths=-123;refs.rotation_tenths=-123;refs.ready=1;
- migrated.save_configuration_(old,refs,true);MeterSetup angle;angle.load_();assert(!angle.paused_&&angle.settings_.rotation_tenths==-123&&angle.alignment_.rotation_tenths==-123);
- refs.rotation_tenths=0;migrated.save_configuration_(old,refs,true);MeterSetup mismatch;mismatch.load_();assert(mismatch.paused_&&mismatch.reading_problem_);
- std::cout<<"Persistence passed: legacy migration, reference reload, persistent reset without resurrection, invalid-reference pause\n";
+ auto current=upgrade_settings(old);assert(migrated.save_configuration_(current,refs,true));MeterSetup reboot;reboot.load_();assert(!reboot.paused_&&reboot.settings_.baseline==old.baseline&&reboot.alignment_.pixels[1][42]==213&&reboot.draft_alignment_.ready);
+ assert(reboot.save_configuration_(Settings{},AlignmentReference{},true));MeterSetup cleared;cleared.load_();assert(!cleared.settings_.calibrated&&cleared.paused_&&!cleared.alignment_.ready&&cleared.settings_.baseline==0);
+ refs.ready=0;migrated.save_configuration_(current,refs,true);MeterSetup corrupt;corrupt.load_();assert(corrupt.paused_&&corrupt.reading_problem_);
+ Settings draft;draft.interval=120;draft.digit_count=6;draft.boxes[0][0]=10;draft.boxes[0][1]=20;draft.boxes[0][2]=40;draft.boxes[0][3]=60;migrated.save_configuration_(draft,AlignmentReference{},true);MeterSetup partial;partial.load_();assert(partial.paused_&&partial.settings_.digit_count==6&&partial.settings_.boxes[0][0]==10);
+ static_assert(sizeof(LegacySettings)==84);static_assert(sizeof(LegacyConfiguration)==624);
+ LegacyConfiguration prior;prior.settings=old;prior.settings.rotation_tenths=-123;prior.alignment=refs;prior.alignment.ready=1;prior.alignment.rotation_tenths=-123;
+ storage.erase(0x7a32b90b);globals.make_preference<LegacyConfiguration>(0x7a32b903).save(&prior);MeterSetup from_v2;from_v2.load_();assert(!from_v2.paused_&&from_v2.settings_.digit_count==8&&from_v2.settings_.rotation_tenths==-123&&from_v2.alignment_.pixels[1][42]==213);
+ prior.version=1;prior.settings.rotation_tenths=12345;prior.alignment.rotation_tenths=-23456;storage.erase(0x7a32b90b);globals.make_preference<LegacyConfiguration>(0x7a32b903).save(&prior);MeterSetup padding;padding.load_();assert(!padding.paused_&&padding.settings_.rotation_tenths==0&&padding.alignment_.rotation_tenths==0);
+ current.rotation_tenths=-123;refs.rotation_tenths=-123;refs.ready=1;
+ migrated.save_configuration_(current,refs,true);MeterSetup angle;angle.load_();assert(!angle.paused_&&angle.settings_.rotation_tenths==-123);
+ refs.rotation_tenths=0;migrated.save_configuration_(current,refs,true);MeterSetup mismatch;mismatch.load_();assert(mismatch.paused_&&mismatch.reading_problem_);
+ for(int count=1;count<=9;count++){Settings n;n.digit_count=count;n.decimals=0;n.baseline=maximum_reading(count);n.calibrated=1;for(int i=0;i<count;i++){n.boxes[i][0]=10+i*50;n.boxes[i][1]=10;n.boxes[i][2]=40+i*50;n.boxes[i][3]=50;}assert(MeterSetup::valid_(n));assert(migrated.save_configuration_(n,AlignmentReference{},true));MeterSetup changed;changed.load_();assert(!changed.paused_&&changed.settings_.digit_count==count&&changed.settings_.baseline==maximum_reading(count));n.baseline++;assert(!MeterSetup::valid_(n));}
+ migrated.save_configuration_(Settings{},AlignmentReference{},true);MeterSetup reset;reset.load_();assert(!reset.settings_.calibrated&&reset.settings_.digit_count==8&&reset.settings_.baseline==0);
+ std::cout<<"Persistence passed: all legacy formats, rotation/references, 1..9 digits, drafts and persistent reset without resurrection\n";
 }
+
 '''
 with tempfile.TemporaryDirectory(prefix='meter-persistence-') as temp:
  binary=str(Path(temp)/'test')

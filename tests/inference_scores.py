@@ -10,13 +10,14 @@ source=r'''
 #include <string>
 #include <vector>
 #include <iostream>
+constexpr int MAX_DIGITS=9;
 #define SUPPORT_DOUBLE_BUFFERING
 #define pdTRUE 1
 struct Result {std::vector<float> readings,probabilities;};
 struct Queue {Result *result=nullptr;};
 int xQueuePeek(Queue *q,Result **r,int){*r=q->result;return *r!=nullptr;}
-struct MeterSetup {std::string digits;float values[8]{};int captures=0;
- void capture_digit_scores_(const std::string &s,const float *v){digits=s;for(int i=0;i<8;i++)values[i]=v[i];++captures;}
+struct MeterSetup {std::string digits;float values[9]{};int captures=0;
+ void capture_digit_scores_(const std::string &s,const float *v){digits=s;for(size_t i=0;i<s.size();i++)values[i]=v[i];++captures;}
 };
 struct MeterReaderTFLite {using InferenceResult=Result;Queue *output_queue_=nullptr;int consumed=0;
  void loop(){if(output_queue_&&output_queue_->result){output_queue_->result=nullptr;++consumed;}}
@@ -32,6 +33,8 @@ int main(){
  r.readings[7]=9.8f;q.result=&r;reader.loop();assert(owner.digits=="01864260");
  r.probabilities[0]=NAN;q.result=&r;reader.loop();assert(owner.captures==2&&reader.consumed==3);
  r.probabilities.pop_back();q.result=&r;reader.loop();assert(owner.captures==2&&reader.consumed==4);
+ for(int count=1;count<=9;count++){r.readings.assign(count,2);r.probabilities.assign(count,.99f);q.result=&r;reader.loop();assert(owner.digits==std::string(count,'2')&&std::abs(owner.values[count-1]-99.f)<.001f);}
+ const int captures=owner.captures;r.readings.assign(10,2);r.probabilities.assign(10,.99f);q.result=&r;reader.loop();assert(owner.captures==captures);
  std::cout<<"Inference score tests passed: exact eight scores, digit rollover, single-consumer ownership, invalid/short results\n";
 }
 '''

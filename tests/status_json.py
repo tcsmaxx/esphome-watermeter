@@ -24,6 +24,7 @@ unsigned uxTaskGetStackHighWaterMark(void *) { return 24000; }
 '''+f'#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+settings+quote+zones+r'''
 class MeterSetup {
  public:
+ uint8_t result_decimals_=3;
  Settings settings_{}; AlignmentReference alignment_{},draft_alignment_{}; uint32_t reference_revision_=0,alignment_ms_=0;std::string alignment_result_="Ausgeschaltet";
  bool busy_=false,paused_=true,capture_pending_=false,illumination_on_=false,light_test_=false;void *illumination_=nullptr;IlluminationSettings illumination_settings_{};
  uint32_t save_attempt_=0;bool save_ok_=false;
@@ -36,7 +37,7 @@ class MeterSetup {
  std::shared_ptr<uint8_t> preview_;uint32_t preview_sequence_=0;bool preview_rgb_=false;
  struct Power{bool supported(){return true;}bool standby_enabled(){return true;}bool weak_drive(){return false;}bool sleeping(){return true;}std::string status(){return "Sensor im Software-Standby";}}camera_power_;
  bool focus_job_manual_=false;AutofocusSettings autofocus_settings_{};struct AF{bool supported(){return false;}int error(){return 0;}int position(){return -1;}}autofocus_;std::string autofocus_status_="Kamera ohne Autofokus";
- RuntimeSettings runtime_{};float reading_age_=NAN;bool stale_=false;uint32_t config_revision_=0;float digit_confidences_[8]{};std::string confidence_digits_;
+ RuntimeSettings runtime_{};float reading_age_=NAN;bool stale_=false;uint32_t config_revision_=0;float digit_confidences_[9]{};std::string confidence_digits_;
  RecoveryRecord recovery_{};bool reboot_pending_=false;uint32_t recovery_delay_ms_=10000;std::string last_reader_log_;std::string reader_phase_()const{return "idle";}
  std::string status_();
 };

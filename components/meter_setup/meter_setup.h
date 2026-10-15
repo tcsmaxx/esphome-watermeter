@@ -19,19 +19,26 @@
 namespace esphome::meter_setup {
 class AlignedMeterReader;
 struct Settings {
-  uint32_t version{1};
-  uint16_t boxes[8][4]{};
+  uint32_t version{2};
+  uint16_t boxes[9][4]{};
   uint32_t baseline{0}, max_step{1000}, interval{60};
-  uint8_t decimals{3}, calibrated{0};
+  uint8_t decimals{3}, calibrated{0}, digit_count{8};
   int16_t rotation_tenths{0};
 };
-static_assert(sizeof(Settings)==84, "Keep existing preference layout");
-struct Configuration {
-  uint32_t version{2};
-  Settings settings{};
-  AlignmentReference alignment{};
+constexpr uint8_t MAX_DIGITS=9;
+struct LegacySettings {
+  uint32_t version{1};uint16_t boxes[8][4]{};
+  uint32_t baseline{0},max_step{1000},interval{60};
+  uint8_t decimals{3},calibrated{0};int16_t rotation_tenths{0};
 };
-static_assert(sizeof(AlignmentReference)==536 && sizeof(Configuration)==624, "Keep existing preference layout");
+struct Configuration {uint32_t version{3};Settings settings{};AlignmentReference alignment{};};
+struct LegacyConfiguration {uint32_t version{2};LegacySettings settings{};AlignmentReference alignment{};};
+static_assert(sizeof(LegacySettings)==84 && sizeof(LegacyConfiguration)==624,"Legacy preference layout");
+inline Settings upgrade_settings(const LegacySettings &old) {
+  Settings next;std::memcpy(next.boxes,old.boxes,sizeof(old.boxes));next.baseline=old.baseline;next.max_step=old.max_step;
+  next.interval=old.interval;next.decimals=old.decimals;next.calibrated=old.calibrated;next.rotation_tenths=old.rotation_tenths;return next;
+}
+inline uint32_t maximum_reading(uint8_t count) {uint32_t n=1;for(uint8_t i=0;i<count&&i<MAX_DIGITS;i++)n*=10;return n-1;}
 struct AutofocusSettings {uint32_t version{2};uint8_t before_reading{1},manual_enabled{0};uint16_t position{512};};
 struct RuntimeSettings {
   uint32_t version{1}, warning_after{300}, last_valid_epoch{0};
@@ -133,9 +140,9 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   void mqtt_loop_();
   RuntimeSettings runtime_{};
   ESPPreferenceObject runtime_preference_;
-  sensor::Sensor *age_sensor_{},*confidence_sensor_{},*digit_sensors_[8]{};
+  sensor::Sensor *age_sensor_{},*confidence_sensor_{},*digit_sensors_[MAX_DIGITS]{};
   binary_sensor::BinarySensor *stale_sensor_{};
-  float digit_confidences_[8]{};
+  float digit_confidences_[MAX_DIGITS]{};
   std::string confidence_digits_,export_json_,pending_import_;
   uint32_t pending_warning_after_{0},config_revision_{0},health_updated_{0},boot_started_{0},mqtt_image_sequence_{0};
   float reading_age_{NAN};
@@ -203,6 +210,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   std::string status_json_, http_task_name_;
   uint32_t status_updated_{0}, http_stack_free_{0};
   std::string digits_;
+  uint8_t result_decimals_{3},preview_decimals_{3};
   uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
   float confidence_{0};
   bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
