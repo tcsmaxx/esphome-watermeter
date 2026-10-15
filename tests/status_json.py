@@ -34,7 +34,7 @@ class MeterSetup {
  uint16_t led_capacity_() const{return 64;}
  std::shared_ptr<uint8_t> preview_;uint32_t preview_sequence_=0;bool preview_rgb_=false;
  struct Power{bool supported(){return true;}bool standby_enabled(){return true;}bool weak_drive(){return false;}bool sleeping(){return true;}std::string status(){return "Sensor im Software-Standby";}}camera_power_;
- AutofocusSettings autofocus_settings_{};struct AF{bool supported(){return false;}int error(){return 0;}}autofocus_;std::string autofocus_status_="Kamera ohne Autofokus";
+ bool focus_job_manual_=false;AutofocusSettings autofocus_settings_{};struct AF{bool supported(){return false;}int error(){return 0;}int position(){return -1;}}autofocus_;std::string autofocus_status_="Kamera ohne Autofokus";
  RuntimeSettings runtime_{};float reading_age_=NAN;bool stale_=false;uint32_t config_revision_=0;float digit_confidences_[8]{};std::string confidence_digits_;
  RecoveryRecord recovery_{};bool reboot_pending_=false;uint32_t recovery_delay_ms_=10000;std::string last_reader_log_;std::string reader_phase_()const{return "idle";}
  std::string status_();

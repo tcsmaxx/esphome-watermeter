@@ -29,7 +29,7 @@ struct Configuration {
   Settings settings{};
   AlignmentReference alignment{};
 };
-struct AutofocusSettings {uint32_t version{1};uint8_t before_reading{1};};
+struct AutofocusSettings {uint32_t version{2};uint8_t before_reading{1},manual_enabled{0};uint16_t position{512};};
 struct RuntimeSettings {
   uint32_t version{1}, warning_after{300}, last_valid_epoch{0};
 };
@@ -107,6 +107,8 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   AutofocusSettings autofocus_settings_{};
   ESPPreferenceObject autofocus_preference_;
   bool autofocus_once_{false},autofocus_used_{false},pending_autofocus_{true};
+  bool manual_focus_once_{false},focus_job_manual_{false},pending_manual_focus_{false};
+  uint16_t manual_focus_position_{512},pending_focus_position_{512};
   std::string autofocus_status_{"Noch nicht fokussiert"};
   void illumination_loop_();
   void set_illumination_(bool on,const IlluminationSettings &settings);
@@ -195,7 +197,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
   float confidence_{0};
   bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
-  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE, POWER_SAVE, LIVE_START, LIVE_STOP } command_{NONE};
+  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE, POWER_SAVE, LIVE_START, LIVE_STOP, MANUAL_FOCUS } command_{NONE};
   bool paused_{true};
 };
 class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {

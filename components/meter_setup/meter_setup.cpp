@@ -292,7 +292,7 @@ void MeterSetup::begin_capture_(bool inference) {
   if(automatic_light) {
     set_illumination_(true,lighting);
     capture_stage_=0;capture_deadline_=millis()+lighting.settle_ms;
-  } else if(camera_power_.supported()||autofocus_once_||(autofocus_settings_.before_reading&&autofocus_.supported())) {
+  } else if(camera_power_.supported()||autofocus_once_||((autofocus_settings_.before_reading||autofocus_settings_.manual_enabled||manual_focus_once_)&&autofocus_.supported())) {
     capture_stage_=0;capture_deadline_=millis();
   } else {
     capture_stage_=2;
@@ -339,7 +339,7 @@ void MeterSetup::start_(bool test) {
 void MeterSetup::loop() {
   std::lock_guard<std::mutex> guard(mutex_);
   Command cmd=command_; command_=NONE;
-  live_loop_(cmd==LIVE_START,cmd==LIVE_STOP || (cmd!=NONE && cmd!=LIVE_START));
+  live_loop_(cmd==LIVE_START,cmd==LIVE_STOP || (cmd!=NONE && cmd!=LIVE_START && cmd!=MANUAL_FOCUS));
   if(cmd==RESTART && !reboot_pending_) {
     record_fault_("Manueller Neustart über Setup",false);
     reboot_pending_=true;reboot_at_=millis()+1500;paused_=true;
@@ -352,9 +352,13 @@ void MeterSetup::loop() {
     else message_="Stromspareinstellungen konnten nicht gespeichert werden";
   }
   if(cmd==FOCUS_SAVE) {
-    const auto old=autofocus_settings_;autofocus_settings_.before_reading=pending_autofocus_;
+    const auto old=autofocus_settings_;autofocus_settings_.before_reading=pending_autofocus_;autofocus_settings_.manual_enabled=pending_manual_focus_;autofocus_settings_.position=pending_focus_position_;
     if(autofocus_preference_.save(&autofocus_settings_)&&global_preferences->sync()){message_="Fokuseinstellung gespeichert";build_export_();}
     else {autofocus_settings_=old;autofocus_preference_.save(&old);global_preferences->sync();message_="Fokuseinstellung konnte nicht gespeichert werden";}
+  }
+  if(cmd==MANUAL_FOCUS){
+    if(live_){camera_->stop_stream(camera::WEB_REQUESTER);live_streaming_=false;}else paused_=true;
+    manual_focus_once_=true;manual_focus_position_=pending_focus_position_;begin_capture_(false);
   }
   if(cmd==FOCUS){paused_=true;autofocus_once_=true;message_="Autofokus wird vorbereitet …";begin_capture_(false);}
   if(cmd==IMPORT && !busy_)import_config_();
@@ -518,6 +522,10 @@ std::string MeterSetup::status_() {
   out+=",\"camera_sleeping\":";out+=camera_power_.sleeping()?"true":"false";
   out+=",\"camera_weak_drive\":";out+=camera_power_.weak_drive()?"true":"false";
   out+=",\"camera_power_status\":";out+=quote(camera_power_.status());
+  out+=",\"manual_focus_enabled\":";out+=autofocus_settings_.manual_enabled?"true":"false";
+  out+=",\"manual_focus_position\":";out+=std::to_string(autofocus_settings_.position);
+  out+=",\"manual_focus_applied\":";out+=autofocus_.position()<0?"null":std::to_string(autofocus_.position());
+  out+=",\"focus_job_manual\":";out+=focus_job_manual_?"true":"false";
   out+=",\"autofocus_available\":";out+=autofocus_.supported()?"true":"false";
   out+=",\"autofocus_before_reading\":";out+=autofocus_settings_.before_reading?"true":"false";
   out+=",\"autofocus_status\":";out+=quote(autofocus_status_);
@@ -631,7 +639,7 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     if(live_||command_==LIVE_START)command_=LIVE_STOP;
     r->send(200,"text/plain","Livebild wird beendet");return;
   }
-  if(live_){r->send(409,"text/plain; charset=utf-8","Zuerst Livebild stoppen");return;}
+  if(live_ && url!="/meter/manual_focus"){r->send(409,"text/plain; charset=utf-8","Zuerst Livebild stoppen");return;}
   if(command_!=NONE || ((busy_ || capture_pending_) && url!="/meter/pause")) {r->send(409,"text/plain","Bitte laufende Aktion abwarten");return;}
   if(url=="/meter/live_start"){command_=LIVE_START;r->send(200,"text/plain","Livebild wird gestartet");return;}
   if(url=="/meter/power_save"){
@@ -640,13 +648,30 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     if((standby!="0"&&standby!="1")||(weak!="0"&&weak!="1")){r->send(400,"text/plain","Nur 0 oder 1 erlaubt");return;}
     pending_standby_=standby=="1";pending_weak_drive_=weak=="1";command_=POWER_SAVE;r->send(200,"text/plain","Stromsparen vorgemerkt");return;
   }
+  if(url=="/meter/manual_focus"){
+    if(!autofocus_.supported()){r->send(400,"text/plain","OV5640 erforderlich");return;}
+    if(!r->hasParam("position")){r->send(400,"text/plain","Fokusposition fehlt");return;}
+    const std::string v=r->getParam("position")->value();
+    if(v.empty()||v.size()>4||v.find_first_not_of("0123456789")!=std::string::npos||std::strtoul(v.c_str(),nullptr,10)>1023){r->send(400,"text/plain","Fokusposition: 0 bis 1023");return;}
+    pending_focus_position_=std::strtoul(v.c_str(),nullptr,10);command_=MANUAL_FOCUS;
+    r->send(200,"text/plain","Manueller Fokus wird gesetzt");return;
+  }
   if(url=="/meter/focus" || url=="/meter/focus_save") {
     if(url=="/meter/focus"){
       if(!autofocus_.supported()){r->send(400,"text/plain; charset=utf-8","Autofokus wird von dieser Kamera nicht unterstützt");return;}
+      if(autofocus_settings_.manual_enabled){r->send(400,"text/plain","Zuerst manuellen Fokusmodus ausschalten und speichern");return;}
       command_=FOCUS;
     } else {
       if(!r->hasParam("enabled")||(r->getParam("enabled")->value()!="0"&&r->getParam("enabled")->value()!="1")){r->send(400,"text/plain","enabled: 0 oder 1 erforderlich");return;}
-      pending_autofocus_=r->getParam("enabled")->value()=="1";command_=FOCUS_SAVE;
+      pending_autofocus_=r->getParam("enabled")->value()=="1";pending_manual_focus_=false;pending_focus_position_=autofocus_settings_.position;
+      if(r->hasParam("manual")){
+        const std::string m=r->getParam("manual")->value();if(m!="0"&&m!="1"){r->send(400,"text/plain","manual: 0 oder 1 erforderlich");return;}pending_manual_focus_=m=="1";
+      }
+      if(r->hasParam("position")){
+        const std::string v=r->getParam("position")->value();if(v.empty()||v.size()>4||v.find_first_not_of("0123456789")!=std::string::npos||std::strtoul(v.c_str(),nullptr,10)>1023){r->send(400,"text/plain","Fokusposition: 0 bis 1023");return;}pending_focus_position_=std::strtoul(v.c_str(),nullptr,10);
+      }
+      if(pending_manual_focus_&&pending_autofocus_){r->send(400,"text/plain","Automatischer und manueller Fokus schließen sich aus");return;}
+      command_=FOCUS_SAVE;
     }
     r->send(200,"text/plain; charset=utf-8","Fokusaktion vorgemerkt");return;
   }

@@ -3,15 +3,23 @@
 namespace esphome::meter_setup {
 void MeterSetup::autofocus_setup_() {
   autofocus_preference_=global_preferences->make_preference<AutofocusSettings>(0x7a32b909);
-  AutofocusSettings saved;if(autofocus_preference_.load(&saved)&&saved.version==1&&saved.before_reading<=1)autofocus_settings_=saved;
+  AutofocusSettings saved;
+  if(autofocus_preference_.load(&saved)&&saved.before_reading<=1){
+    if(saved.version==1){autofocus_settings_.before_reading=saved.before_reading;} // Same 8-byte layout; ignore legacy padding.
+    else if(saved.version==2&&saved.manual_enabled<=1&&saved.position<=1023&&!(saved.before_reading&&saved.manual_enabled))autofocus_settings_=saved;
+  }
   autofocus_status_=autofocus_.supported()?"Bereit · noch nicht fokussiert":"Kamera ohne Autofokus";
 }
 bool MeterSetup::start_autofocus_() {
-  if(!autofocus_once_&&(!autofocus_settings_.before_reading||!autofocus_.supported()))return false;
+  const bool manual=manual_focus_once_||(!autofocus_once_&&autofocus_settings_.manual_enabled);
+  if(!manual&&!autofocus_once_&&(!autofocus_settings_.before_reading||!autofocus_.supported()))return false;
+  if(!autofocus_.supported())return false;
+  const uint16_t position=manual_focus_once_?manual_focus_position_:autofocus_settings_.position;
+  manual_focus_once_=false;focus_job_manual_=manual;
   autofocus_once_=false;autofocus_used_=true;
   if(autofocus_power_generation_!=camera_power_.generation()){autofocus_.invalidate();autofocus_power_generation_=camera_power_.generation();}
-  if(!autofocus_.start()){autofocus_failed_("Autofokus konnte nicht gestartet werden");return true;}
-  capture_stage_=3;autofocus_status_="Fokussierung läuft";message_="Fokussierung läuft …";return true;
+  if(!(manual?autofocus_.start_manual(position):autofocus_.start())){autofocus_failed_(manual?"Manueller Fokus konnte nicht gestartet werden":"Autofokus konnte nicht gestartet werden");return true;}
+  capture_stage_=3;autofocus_status_=manual?"Manuelle Fokusposition wird gesetzt":"Fokussierung läuft";message_=autofocus_status_+" …";return true;
 }
 void MeterSetup::autofocus_failed_(const char *reason) {
   autofocus_status_=reason;message_=reason;capture_pending_=false;inference_started_=false;busy_=false;
@@ -28,8 +36,8 @@ void MeterSetup::autofocus_loop_() {
     record_fault_(autofocus_status_,true);paused_=true;busy_=true;reboot_pending_=true;reboot_at_=millis()+5000;
     set_illumination_(false,illumination_settings_);reader_->set_pause_processing(true);return;
   }
-  if(state!=AutofocusController::FOCUSED){autofocus_failed_("Fokus nicht gefunden; Beleuchtung/Abstand prüfen");return;}
-  autofocus_status_="Fokus gefunden";message_="Fokus gefunden; neues Bild wird aufgenommen";
+  if(state!=AutofocusController::FOCUSED){autofocus_failed_(focus_job_manual_?"Manuelle Fokusposition nicht bestätigt; Aufnahme verworfen":"Fokus nicht gefunden; Beleuchtung/Abstand prüfen");return;}
+  autofocus_status_=focus_job_manual_?"Manuelle Fokusposition gesetzt (Register bestätigt)":"Fokus gefunden";message_=autofocus_status_+"; neues Bild wird aufgenommen";
   capture_stage_=1;flush_received_=false;camera_->request_image(camera::WEB_REQUESTER);
 }
 }

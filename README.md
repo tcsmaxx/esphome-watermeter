@@ -242,15 +242,21 @@ Im Setup zeigt **Kamera & Wärme** den aktuellen Zustand. **Schwächere Kamerasi
 
 Unterstützt wird das Seeed-Modul **OV5640 Camera for XIAO ESP32S3 Sense (With Heat Sink), SKU 114993115**. Die Kamerapins und die Auflösung **640 × 480** bleiben bestehen. Die Komponente aktiviert die native Autofokus-Unterstützung des Kameratreibers beim Kompilieren; eine zusätzliche YAML-Option ist nicht erforderlich. Die OV3660 funktioniert ohne Fokusmotor weiter wie bisher.
 
-Im Setup befindet sich der Abschnitt **Autofokus · OV5640**:
+Im Setup bietet **Fokus · OV5640** drei Modi:
 
-- **Neu fokussieren + Bild** pausiert die automatische Ablesung, verwendet den gespeicherten Beleuchtungsvorlauf, fokussiert einmal und nimmt anschließend ein neues Vorschaubild auf. Danach mit **Fortsetzen** die Automatik wieder starten.
-- **Automatisch vor jeder neuen Aufnahme fokussieren** gilt für **Neues Bild**, Rahmentests und regelmäßige Ablesungen; beim Debug-Livebild wird einmal beim Start fokussiert. Die Option ist standardmäßig aktiv und lässt sich mit **Fokus speichern** dauerhaft ändern. Ausgeschaltet wird nur auf Knopfdruck fokussiert; die mechanische Position ist nicht als Konfigurationswert gespeichert. Eine unveränderte Linsenposition über Standby und Neustarts wird nicht vorausgesetzt. Bei aktiviertem Standby ist der Einzelfokus vor jeder Ablesung empfehlenswert.
-- Der Fokusstatus wird im Setup und in `/meter/status` angezeigt (`autofocus_available`, `autofocus_before_reading`, `autofocus_status`, `autofocus_error`).
+- **Automatisch vor jeder Aufnahme:** Einzelfokus vor neuen Setupbildern, Rahmentests und regelmäßigen Ablesungen; einmal beim Start des Debug-Livebilds.
+- **Manuell · gespeicherte Position:** Direkte Motorposition von **0 bis 1023**. Vor jeder Setupaufnahme und Ablesung wird die gespeicherte Position erneut gesetzt, auch nach Standby oder Neustart. Kein automatischer Fokuslauf überschreibt sie.
+- **Autofokus nur auf Knopfdruck:** Fokussierung ausschließlich mit **Einmal automatisch fokussieren**; dabei wird keine feste Position gespeichert.
 
-Der Ablauf ist **Lichtvorlauf → Einzelfokus → veralteten Kamerapuffer verwerfen → frisches Bild → Ausrichtung und OCR**. Es wird kein kontinuierlicher Autofokus aktiviert. Firmware-Initialisierung und Treiberaufrufe laufen in einer separaten Aufgabe mit 5 KiB Stack. Die eigentliche Scharfstellung wird höchstens vier Sekunden geprüft; die gesamte Fokusaufgabe hat ein Zeitlimit von 15 Sekunden. Ein normaler Fokusfehler verwirft die Aufnahme und plant den nächsten Ableseversuch, ohne einen Zählerstand zu übernehmen. Eine hängende Fokusaufgabe wird isoliert und löst nach fünf Sekunden einen protokollierten Neustart aus.
+Für die manuelle Einrichtung den manuellen Modus wählen, den Regler oder das Zahlenfeld einstellen und **Position testen + Bild** anklicken. **−10 / −1 / +1 / +10** ändern die Position und fordern direkt ein neues Bild an. Das funktioniert auch während des Debug-Livebilds; für die Einstellung wird dessen Bilderzeugung kurz unterbrochen und anschließend fortgesetzt. Fokustests pausieren die automatische Ablesung, ändern aber nicht die gespeicherte Konfiguration. Zum dauerhaften Übernehmen das Livebild stoppen und **Fokus speichern** wählen. Danach bei Bedarf **Fortsetzen** wählen. Die gespeicherte Einstellung wird ab der nächsten Aufnahme verwendet.
 
-Die Option wird exportiert und importiert. Sicherungen ohne dieses Feld bleiben kompatibel und behalten die aktuelle Fokuseinstellung bei. Nach einem Kameratausch die Ziffernrahmen prüfen und Referenzen neu aufnehmen. Bei fehlendem Fokus Beleuchtung, Kamerabstand und freie Sicht auf die Ziffern kontrollieren.
+Positionswerte sind Motorwerte, keine Entfernungsangaben. **Register bestätigt** bedeutet, dass der geschriebene Zielwert zurückgelesen wurde; die tatsächliche Bildschärfe und die Wiederholgenauigkeit des konkreten Kameramoduls sind am Bild zu prüfen. Bei unverändert montiertem Zähler bietet der feste Fokus eine reproduzierbare Vorgabe ohne erneute Fokussuche.
+
+Der Ablauf bleibt **Lichtvorlauf → Fokus einstellen → alten Kamerapuffer verwerfen → frisches Bild → Ausrichtung und OCR**. Treiberaufrufe laufen in einer separaten Aufgabe mit 5 KiB Stack und Zeitlimit. Ein Fokusfehler verwirft die Aufnahme und plant den nächsten Ableseversuch; eine hängende Fokusaufgabe löst nach fünf Sekunden einen protokollierten Neustart aus.
+
+Die manuelle Ansteuerung verwendet die im [OV5640-Datenblatt](https://files.seeedstudio.com/wiki/SeeedStudio-XIAO-ESP32S3/res/OV5640_datasheet.pdf) beschriebenen 10-Bit-VCM-Zielregister `0x3602[7:4]` und `0x3603[5:0]`. Nur der AF-Mikrocontroller wird über `0x3000[5]` angehalten; der Bildsensor wird dabei nicht zurückgesetzt. Slew-Rate- und Debug-Bits bleiben erhalten. Beim Wechsel zurück zum Autofokus wird dessen Firmware vor dem nächsten Fokuslauf neu initialisiert. Es werden keine Dateien der eingebundenen Kamerabibliothek verändert.
+
+Modus und Position werden dauerhaft gespeichert sowie exportiert, importiert und beim Zurücksetzen gelöscht. Bestehende gespeicherte Autofokus-Einstellungen und ältere Sicherungen bleiben kompatibel. `/meter/status` enthält `manual_focus_enabled`, `manual_focus_position`, `manual_focus_applied` (letzter bestätigter Zielwert oder `null`) und `focus_job_manual` zusätzlich zu den Autofokusdiagnosen. Nach einem Kameratausch die Ziffernrahmen prüfen und Referenzen neu aufnehmen.
 
 ## MQTT und zweite Home-Assistant-Instanz
 

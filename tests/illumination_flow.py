@@ -45,7 +45,7 @@ using AddressableLightState=LightState;
 }
 struct CountedWhiteEffect {explicit CountedWhiteEffect(void*){}};
 namespace camera {enum CameraRequester{WEB_REQUESTER};struct CameraImage{std::vector<uint8_t> data=std::vector<uint8_t>(20,3);size_t get_data_length(){return data.size();}uint8_t *get_data_buffer(){return data.data();}};}
-struct Camera {int requests=0,streams=0;void start_stream(camera::CameraRequester){++streams;}void request_image(camera::CameraRequester){++requests;}};
+struct Camera {int requests=0,streams=0,stops=0;void stop_stream(camera::CameraRequester){++stops;}void start_stream(camera::CameraRequester){++streams;}void request_image(camera::CameraRequester){++requests;}};
 struct Reader {bool paused=true;int updates=0;virtual ~Reader(){};void set_pause_processing(bool v){paused=v;}void update(){++updates;}};
 struct AlignedMeterReader:Reader {int arms=0;void arm_for_capture(){++arms;}};
 class MeterSetup {
@@ -53,6 +53,7 @@ class MeterSetup {
 '''+fields+r'''
  Camera camera;Camera *camera_=&camera;AlignedMeterReader reader;Reader *reader_=&reader;
  struct Power{bool available=false,awake=true;int requests=0;void request(){++requests;}bool supported(){return available;}bool ready(){return awake;}uint32_t generation(){return 0;}}camera_power_;
+ bool manual_focus_once_=false;
  uint32_t autofocus_power_generation_=UINT32_MAX;
  AutofocusSettings autofocus_settings_{1,0};bool autofocus_once_=false,autofocus_used_=false;struct AF{bool supported(){return false;}}autofocus_;bool start_autofocus_(){return false;}void autofocus_loop_(){}
  bool live_=false,live_streaming_=false;uint32_t live_last_frame_=0,live_frame_at_=0;

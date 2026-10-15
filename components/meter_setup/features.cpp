@@ -76,7 +76,7 @@ void MeterSetup::build_export_() {
   static constexpr char hex[]="0123456789abcdef";
   std::string pixels;pixels.reserve(1024);for(const auto &row:alignment_.pixels)for(uint8_t b:row){pixels+=hex[b>>4];pixels+=hex[b&15];}
   export_json_=json::build_json([&](JsonObject root){
-    root["format"]="esphome-watermeter";root["version"]=1;root["camera_width"]=640;root["camera_height"]=480;root["warning_after"]=runtime_.warning_after;root["autofocus_before_reading"]=bool(autofocus_settings_.before_reading);root["camera_standby"]=camera_power_.standby_enabled();root["camera_weak_drive"]=camera_power_.weak_drive();
+    root["format"]="esphome-watermeter";root["version"]=1;root["camera_width"]=640;root["camera_height"]=480;root["warning_after"]=runtime_.warning_after;root["autofocus_before_reading"]=bool(autofocus_settings_.before_reading);root["manual_focus_enabled"]=bool(autofocus_settings_.manual_enabled);root["manual_focus_position"]=autofocus_settings_.position;root["camera_standby"]=camera_power_.standby_enabled();root["camera_weak_drive"]=camera_power_.weak_drive();
     auto s=root["settings"].to<JsonObject>();s["baseline"]=settings_.baseline;s["max_step"]=settings_.max_step;s["interval"]=settings_.interval;s["decimals"]=settings_.decimals;s["calibrated"]=bool(settings_.calibrated);
     auto boxes=s["boxes"].to<JsonArray>();for(const auto &box:settings_.boxes){auto row=boxes.add<JsonArray>();for(auto v:box)row.add(v);}
     auto a=root["alignment"].to<JsonObject>();a["enabled"]=bool(alignment_.enabled);a["ready"]=bool(alignment_.ready);a["pixels"]=pixels;
@@ -93,6 +93,12 @@ void MeterSetup::import_config_() {
     if(!root["camera_standby"].isNull()){if(!root["camera_standby"].is<bool>())return false;standby=root["camera_standby"].as<bool>();}
     if(!root["camera_weak_drive"].isNull()){if(!root["camera_weak_drive"].is<bool>())return false;weak=root["camera_weak_drive"].as<bool>();}
     if(!root["autofocus_before_reading"].isNull()){if(!root["autofocus_before_reading"].is<bool>())return false;focus.before_reading=root["autofocus_before_reading"].as<bool>();}
+    if(!root["manual_focus_enabled"].isNull()){
+      if(!root["manual_focus_enabled"].is<bool>())return false;focus.manual_enabled=root["manual_focus_enabled"].as<bool>();
+      uint32_t position;if(!uint_value(root["manual_focus_position"],0,1023,position))return false;focus.position=position;
+    }else if(!root["manual_focus_position"].isNull())return false;
+    else if(!root["autofocus_before_reading"].isNull())focus.manual_enabled=0;
+    if(focus.manual_enabled&&focus.before_reading)return false;
     if(!uint_value(root["warning_after"],30,86400,options.warning_after))return false;
     auto s=root["settings"].as<JsonObject>();uint32_t v;
     if(!s["calibrated"].is<bool>()||!uint_value(s["baseline"],0,99999999,cfg.baseline)||!uint_value(s["max_step"],1,99999999,cfg.max_step)||!uint_value(s["interval"],10,86400,cfg.interval)||!uint_value(s["decimals"],0,6,v))return false;
