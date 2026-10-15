@@ -76,7 +76,7 @@ void MeterSetup::build_export_() {
   static constexpr char hex[]="0123456789abcdef";
   std::string pixels;pixels.reserve(1024);for(const auto &row:alignment_.pixels)for(uint8_t b:row){pixels+=hex[b>>4];pixels+=hex[b&15];}
   export_json_=json::build_json([&](JsonObject root){
-    root["format"]="esphome-watermeter";root["version"]=1;root["camera_width"]=640;root["camera_height"]=480;root["warning_after"]=runtime_.warning_after;root["autofocus_before_reading"]=bool(autofocus_settings_.before_reading);
+    root["format"]="esphome-watermeter";root["version"]=1;root["camera_width"]=640;root["camera_height"]=480;root["warning_after"]=runtime_.warning_after;root["autofocus_before_reading"]=bool(autofocus_settings_.before_reading);root["camera_standby"]=camera_power_.standby_enabled();root["camera_weak_drive"]=camera_power_.weak_drive();
     auto s=root["settings"].to<JsonObject>();s["baseline"]=settings_.baseline;s["max_step"]=settings_.max_step;s["interval"]=settings_.interval;s["decimals"]=settings_.decimals;s["calibrated"]=bool(settings_.calibrated);
     auto boxes=s["boxes"].to<JsonArray>();for(const auto &box:settings_.boxes){auto row=boxes.add<JsonArray>();for(auto v:box)row.add(v);}
     auto a=root["alignment"].to<JsonObject>();a["enabled"]=bool(alignment_.enabled);a["ready"]=bool(alignment_.ready);a["pixels"]=pixels;
@@ -85,11 +85,13 @@ void MeterSetup::build_export_() {
   });
 }
 void MeterSetup::import_config_() {
-  Settings cfg;AlignmentReference refs;IlluminationSettings light;RuntimeSettings options;auto focus=autofocus_settings_;
+  Settings cfg;AlignmentReference refs;IlluminationSettings light;RuntimeSettings options;auto focus=autofocus_settings_;const bool old_standby=camera_power_.standby_enabled(),old_weak=camera_power_.weak_drive();bool standby=old_standby,weak=old_weak;
   const auto uint_value=[](JsonVariant value,uint32_t min,uint32_t max,uint32_t &out){if(!value.is<uint32_t>())return false;out=value.as<uint32_t>();return out>=min&&out<=max;};
   const bool valid=json::parse_json(pending_import_,[&](JsonObject root){
     uint32_t header_value;
     if(!root["format"].is<const char*>()||std::strcmp(root["format"],"esphome-watermeter")||!uint_value(root["version"],1,1,header_value)||!uint_value(root["camera_width"],640,640,header_value)||!uint_value(root["camera_height"],480,480,header_value))return false;
+    if(!root["camera_standby"].isNull()){if(!root["camera_standby"].is<bool>())return false;standby=root["camera_standby"].as<bool>();}
+    if(!root["camera_weak_drive"].isNull()){if(!root["camera_weak_drive"].is<bool>())return false;weak=root["camera_weak_drive"].as<bool>();}
     if(!root["autofocus_before_reading"].isNull()){if(!root["autofocus_before_reading"].is<bool>())return false;focus.before_reading=root["autofocus_before_reading"].as<bool>();}
     if(!uint_value(root["warning_after"],30,86400,options.warning_after))return false;
     auto s=root["settings"].as<JsonObject>();uint32_t v;
@@ -111,8 +113,8 @@ void MeterSetup::import_config_() {
   });
   pending_import_.clear();
   if(!valid){message_="Import abgelehnt: ungültige oder inkompatible Sicherung";return;}
-  const bool saved=save_configuration_(cfg,refs,false)&&illumination_preference_.save(&light)&&runtime_preference_.save(&options)&&autofocus_preference_.save(&focus)&&global_preferences->sync();
-  if(!saved){save_configuration_(settings_,alignment_,false);illumination_preference_.save(&illumination_settings_);runtime_preference_.save(&runtime_);autofocus_preference_.save(&autofocus_settings_);global_preferences->sync();message_="Import fehlgeschlagen: Speicherung nicht möglich";return;}
+  const bool saved=save_configuration_(cfg,refs,false)&&illumination_preference_.save(&light)&&runtime_preference_.save(&options)&&autofocus_preference_.save(&focus)&&camera_power_.configure(standby,weak)&&global_preferences->sync();
+  if(!saved){save_configuration_(settings_,alignment_,false);illumination_preference_.save(&illumination_settings_);runtime_preference_.save(&runtime_);autofocus_preference_.save(&autofocus_settings_);camera_power_.configure(old_standby,old_weak);global_preferences->sync();message_="Import fehlgeschlagen: Speicherung nicht möglich";return;}
   settings_=pending_=cfg;alignment_=draft_alignment_=pending_alignment_=refs;illumination_settings_=pending_illumination_=light;runtime_=options;autofocus_settings_=focus;
   paused_=true;accepted_=false;reading_problem_=false;reading_error_.clear();have_previous_reading_=false;reading_age_=NAN;stale_=false;boot_started_=millis();
   preview_.reset();inference_jpeg_.reset();preview_size_=inference_jpeg_size_=0;digits_.clear();confidence_digits_.clear();confidence_=0;

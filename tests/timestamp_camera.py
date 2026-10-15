@@ -30,6 +30,7 @@ void heap_caps_free(void *p){free(p);}
 int64_t esp_timer_get_time(){return 10000000;}
 namespace esphome {
 struct EntityBase{std::string name="Kamerabild";uint32_t hash=7654;bool internal=false;};
+namespace meter_setup {struct CameraPowerController{int requests=0;bool awake=true;void request(){++requests;}bool ready(){return awake;}};}
 namespace setup_priority {constexpr float IO=900;}
 namespace camera {
 enum CameraRequester{IDLE,API_REQUESTER,WEB_REQUESTER};
@@ -39,7 +40,7 @@ struct CameraImageReader {virtual void set_image(std::shared_ptr<CameraImage>)=0
 struct Camera:EntityBase {
  Camera(){assert(global_camera==nullptr);global_camera=this;}virtual void setup(){};virtual float get_setup_priority()const{return 0;}
  virtual void add_listener(CameraListener*)=0;virtual CameraImageReader *create_image_reader()=0;virtual void request_image(CameraRequester)=0;virtual void start_stream(CameraRequester)=0;virtual void stop_stream(CameraRequester)=0;
- static Camera *instance(){return global_camera;}protected:inline static Camera *global_camera=nullptr;
+ static Camera *instance(){return global_camera;}virtual void loop(){}protected:inline static Camera *global_camera=nullptr;
 };
 }
 namespace esp32_camera {
@@ -81,8 +82,10 @@ int main(){
  assert(camera::Camera::instance()==proxy&&proxy->name==physical.name&&proxy->hash==physical.hash);
  for(auto *l:physical.listeners)l->on_camera_image(raw);assert(ocr.last==raw&&api.last!=raw&&api.last->get_data_length()==32&&api.last->was_requested_by(camera::API_REQUESTER));
  auto reader=std::unique_ptr<camera::CameraImageReader>(proxy->create_image_reader());reader->set_image(api.last);assert(reader->available()==32&&reader->peek_data_buffer()[0]==255);reader->consume_data(12);assert(reader->available()==20);reader->consume_data(100);assert(reader->available()==0);reader->return_image();assert(reader->peek_data_buffer()==nullptr);
- proxy->request_image(camera::API_REQUESTER);proxy->start_stream(camera::API_REQUESTER);proxy->stop_stream(camera::API_REQUESTER);assert(physical.requests==1&&physical.starts==1&&physical.stops==1&&api.starts==1&&api.stops==1);
+ proxy->request_image(camera::API_REQUESTER);proxy->loop();assert(physical.requests==0);proxy->start_stream(camera::API_REQUESTER);proxy->loop();proxy->stop_stream(camera::API_REQUESTER);assert(physical.requests==0&&physical.starts==1&&physical.stops==1&&api.starts==1&&api.stops==1);
  encoder_fail=true;proxy->on_camera_image(raw);assert(api.last==raw&&ocr.last==raw);
+ CameraPowerController power;proxy->set_power(&power);auto held=api.last;proxy->request_image(camera::API_REQUESTER);proxy->loop();assert(physical.requests==0&&power.requests==0); // cached still polls never wake the sensor
+ power.awake=false;proxy->start_stream(camera::API_REQUESTER);proxy->loop();assert(physical.starts==1&&power.requests==1);power.awake=true;proxy->loop();assert(physical.starts==2&&power.requests==2);proxy->stop_stream(camera::API_REQUESTER);assert(physical.stops==2);
  delete proxy;
  std::cout<<"Timestamp camera passed: German capture time, bounded overlay, untouched OCR source, unsynchronized clock, camera identity, API reader lifetime, stream forwarding and codec failure fallback\n";
 }

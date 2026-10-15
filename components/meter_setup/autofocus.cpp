@@ -21,6 +21,7 @@ AutofocusController::State AutofocusController::state() {
 void AutofocusController::task_(void *context) {
   auto *self=static_cast<AutofocusController*>(context);
   auto *sensor=esp_camera_sensor_get();esp_err_t result=ESP_OK;
+  if(self->reset_requested_.exchange(false))self->initialized_=false;
   if(!self->initialized_){
     esp_camera_af_config_t config{};config.mode=ESP_CAMERA_AF_MODE_MANUAL;config.timeout_ms=2000;
     result=esp_camera_af_init(sensor,&config);self->initialized_=result==ESP_OK;
@@ -36,6 +37,7 @@ void AutofocusController::task_(void *context) {
     } while(millis()-began<4000);
     if(result==ESP_OK&&(!status.focused||status.busy))result=ESP_ERR_TIMEOUT;
   }
+  if(result!=ESP_OK)self->initialized_=false; // Retry firmware initialization after a sensor/wake error.
   self->error_=result;
   if(result==ESP_OK)ESP_LOGI("meter_autofocus","Einzelfokus erfolgreich");
   else ESP_LOGW("meter_autofocus","Autofokus fehlgeschlagen: %s, Status 0x%02x",esp_err_to_name(result),status.raw);

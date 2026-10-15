@@ -202,6 +202,7 @@ void MeterSetup::setup() {
   }
   next_=millis()+recovery_delay_ms_;
   status_json_=status_();
+  camera_power_.setup();
   autofocus_setup_();
   features_setup_();
   server_->add_handler(this);
@@ -280,6 +281,7 @@ void MeterSetup::reset_illumination_() {
   pending_illumination_=illumination_settings_;
 }
 void MeterSetup::begin_capture_(bool inference) {
+  camera_power_.request();
   autofocus_used_=false;
   capture_inference_=inference;capture_started_=millis();inference_started_=false;
   capture_pending_=true;flush_received_=false;
@@ -288,7 +290,7 @@ void MeterSetup::begin_capture_(bool inference) {
   if(automatic_light) {
     set_illumination_(true,lighting);
     capture_stage_=0;capture_deadline_=millis()+lighting.settle_ms;
-  } else if(autofocus_once_||(inference&&autofocus_settings_.before_reading&&autofocus_.supported())) {
+  } else if(camera_power_.supported()||autofocus_once_||(inference&&autofocus_settings_.before_reading&&autofocus_.supported())) {
     capture_stage_=0;capture_deadline_=millis();
   } else {
     capture_stage_=2;
@@ -312,7 +314,7 @@ void MeterSetup::illumination_loop_() {
     if(capture_inference_ && !test_) {reading_problem_=true;reading_error_=message_;}
     next_=millis()+settings_.interval*1000;return;
   }
-  if(capture_stage_==0 && int32_t(millis()-capture_deadline_)>=0) {
+  if(capture_stage_==0 && int32_t(millis()-capture_deadline_)>=0 && camera_power_.ready()) {
     if(start_autofocus_())return;
     capture_stage_=1;camera_->request_image(camera::WEB_REQUESTER);
   } else if(capture_stage_==1 && flush_received_) {
@@ -342,6 +344,10 @@ void MeterSetup::loop() {
   }
   recovery_loop_();
   if(reboot_pending_) {diagnostics_();if(millis()-status_updated_>=250){status_json_=status_();status_updated_=millis();}return;}
+  if(cmd==POWER_SAVE){
+    if(camera_power_.configure(pending_standby_,pending_weak_drive_)){message_="Kamera-Stromspareinstellungen gespeichert";build_export_();}
+    else message_="Stromspareinstellungen konnten nicht gespeichert werden";
+  }
   if(cmd==FOCUS_SAVE) {
     const auto old=autofocus_settings_;autofocus_settings_.before_reading=pending_autofocus_;
     if(autofocus_preference_.save(&autofocus_settings_)&&global_preferences->sync()){message_="Fokuseinstellung gespeichert";build_export_();}
@@ -349,7 +355,7 @@ void MeterSetup::loop() {
   }
   if(cmd==FOCUS){paused_=true;autofocus_once_=true;message_="Autofokus wird vorbereitet …";begin_capture_(false);}
   if(cmd==IMPORT && !busy_)import_config_();
-  if(cmd==RESET && !busy_) {autofocus_settings_=AutofocusSettings{};autofocus_preference_.save(&autofocus_settings_);reset_();runtime_.last_valid_epoch=0;runtime_.warning_after=300;runtime_preference_.save(&runtime_);global_preferences->sync();build_export_();}
+  if(cmd==RESET && !busy_) {camera_power_.configure(true,false);autofocus_settings_=AutofocusSettings{};autofocus_preference_.save(&autofocus_settings_);reset_();runtime_.last_valid_epoch=0;runtime_.warning_after=300;runtime_preference_.save(&runtime_);global_preferences->sync();build_export_();}
   if(cmd==REFERENCE && !busy_) capture_references_();
   if(cmd==CAPTURE) {message_="Kamerabild wird aufgenommen …";begin_capture_(false);}
   if(cmd==LIGHT_SAVE) {
@@ -358,6 +364,7 @@ void MeterSetup::loop() {
   }
   if(cmd==LIGHT_ON) {light_test_=true;light_test_deadline_=millis()+120000;set_illumination_(true,pending_illumination_);message_="Lichttest eingeschaltet (maximal 2 Minuten)";}
   if(cmd==LIGHT_OFF) {light_test_=false;set_illumination_(false,illumination_settings_);message_="Licht ausgeschaltet";}
+  camera_power_.loop(busy_||capture_pending_||autofocus_.state()==AutofocusController::RUNNING||autofocus_.state()==AutofocusController::HUNG);
   illumination_loop_();
   if(cmd==PAUSE) { paused_=true; message_="Automatische Ablesung pausiert"; }
   if(cmd==RESUME && settings_.calibrated) { paused_=false; next_=millis(); }
@@ -497,6 +504,11 @@ std::string MeterSetup::status_() {
   out+=",\"loop_stack_size\":"; out+=std::to_string(ESPHOME_LOOP_TASK_STACK_SIZE);
   out+=",\"loop_stack_free\":"; out+=std::to_string(uxTaskGetStackHighWaterMark(nullptr));
   out+=",\"http_stack_free\":"; out+=std::to_string(http_stack_free_);
+  out+=",\"camera_standby_available\":";out+=camera_power_.supported()?"true":"false";
+  out+=",\"camera_standby_enabled\":";out+=camera_power_.standby_enabled()?"true":"false";
+  out+=",\"camera_sleeping\":";out+=camera_power_.sleeping()?"true":"false";
+  out+=",\"camera_weak_drive\":";out+=camera_power_.weak_drive()?"true":"false";
+  out+=",\"camera_power_status\":";out+=quote(camera_power_.status());
   out+=",\"autofocus_available\":";out+=autofocus_.supported()?"true":"false";
   out+=",\"autofocus_before_reading\":";out+=autofocus_settings_.before_reading?"true":"false";
   out+=",\"autofocus_status\":";out+=quote(autofocus_status_);
@@ -579,6 +591,12 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     command_=RESTART;r->send(200,"text/plain; charset=utf-8","Neustart vorgemerkt");return;
   }
   if(command_!=NONE || ((busy_ || capture_pending_) && url!="/meter/pause")) {r->send(409,"text/plain","Bitte laufende Aktion abwarten");return;}
+  if(url=="/meter/power_save"){
+    if(!r->hasParam("standby")||!r->hasParam("weak_drive")){r->send(400,"text/plain","standby und weak_drive erforderlich");return;}
+    const auto standby=r->getParam("standby")->value(),weak=r->getParam("weak_drive")->value();
+    if((standby!="0"&&standby!="1")||(weak!="0"&&weak!="1")){r->send(400,"text/plain","Nur 0 oder 1 erlaubt");return;}
+    pending_standby_=standby=="1";pending_weak_drive_=weak=="1";command_=POWER_SAVE;r->send(200,"text/plain","Stromsparen vorgemerkt");return;
+  }
   if(url=="/meter/focus" || url=="/meter/focus_save") {
     if(url=="/meter/focus"){
       if(!autofocus_.supported()){r->send(400,"text/plain; charset=utf-8","Autofokus wird von dieser Kamera nicht unterstützt");return;}

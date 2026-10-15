@@ -42,7 +42,7 @@ class TimestampImage : public camera::CameraImage {
   TimestampImage(TimestampJpeg jpeg,const std::shared_ptr<camera::CameraImage> &source):jpeg_(std::move(jpeg)){for(int i=0;i<3;i++)requested_[i]=source->was_requested_by(static_cast<camera::CameraRequester>(i));}
   uint8_t *get_data_buffer() override {return jpeg_.data.get();}
   size_t get_data_length() override {return jpeg_.size;}
-  bool was_requested_by(camera::CameraRequester r) const override {return int(r)<3&&requested_[int(r)];}
+  bool was_requested_by(camera::CameraRequester r) const override {return int(r)<3&&(r==camera::API_REQUESTER||requested_[int(r)]);}
  protected: TimestampJpeg jpeg_;bool requested_[3]{};
 };
 class TimestampImageReader : public camera::CameraImageReader {
@@ -66,11 +66,24 @@ void TimestampCamera::setup() {
   source_->add_listener(this);
 }
 camera::CameraImageReader *TimestampCamera::create_image_reader(){return new TimestampImageReader;}
+void TimestampCamera::loop() {
+  if(pending_requests_&&cached_&&!streams_){
+    // Ordinary HA still-image polling reuses the last real capture without heat.
+    for(auto *listener:listeners_)listener->on_camera_image(cached_);
+    pending_requests_=0;
+  }
+  if(!pending_requests_&&!streams_)return;
+  if(power_){power_->request();if(!power_->ready())return;}
+  for(int i=0;i<3;i++)if((streams_&(1U<<i))&&!(active_streams_&(1U<<i))){source_->start_stream(static_cast<camera::CameraRequester>(i));active_streams_|=1U<<i;}
+  for(int i=0;i<3;i++)if(pending_requests_&(1U<<i))source_->request_image(static_cast<camera::CameraRequester>(i));
+  pending_requests_=0;
+}
 void TimestampCamera::on_camera_image(const std::shared_ptr<camera::CameraImage> &image) {
-  if(listeners_.empty()||(!image->was_requested_by(camera::API_REQUESTER)&&!image->was_requested_by(camera::IDLE)))return;
+  if(listeners_.empty())return;
   auto jpeg=timestamp_jpeg(image->get_data_buffer(),image->get_data_length(),camera_capture_epoch(image));
   if(!jpeg.data){ESP_LOGW("meter_setup","Zeitstempel im API-Bild fehlgeschlagen; Rohbild übertragen");for(auto *listener:listeners_)listener->on_camera_image(image);return;}
   auto annotated=std::make_shared<TimestampImage>(std::move(jpeg),image);
+  cached_=annotated;
   for(auto *listener:listeners_)listener->on_camera_image(annotated);
 }
 }

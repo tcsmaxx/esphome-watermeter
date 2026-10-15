@@ -65,6 +65,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
  public:
   std::shared_ptr<camera::CameraImage> align_image_(const std::shared_ptr<camera::CameraImage> &image);
   void set_illumination(light::AddressableLightState *v) {illumination_=v;v->add_effects({&illumination_effect_});}
+  CameraPowerController *get_camera_power(){return &camera_power_;}
   uint16_t get_active_led_count() const {return illumination_led_count_;}
   uint16_t led_capacity_() const;
   bool accepts_reader_frame_();
@@ -99,6 +100,9 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   bool start_autofocus_();
   void autofocus_loop_();
   void autofocus_failed_(const char *reason);
+  CameraPowerController camera_power_;
+  uint32_t autofocus_power_generation_{UINT32_MAX};
+  bool pending_standby_{true},pending_weak_drive_{false};
   AutofocusController autofocus_;
   AutofocusSettings autofocus_settings_{};
   ESPPreferenceObject autofocus_preference_;
@@ -186,7 +190,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
   float confidence_{0};
   bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
-  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE } command_{NONE};
+  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE, POWER_SAVE } command_{NONE};
   bool paused_{true};
 };
 class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {

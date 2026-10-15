@@ -98,7 +98,7 @@ esp32_camera:
   resolution: 640x480
   jpeg_quality: 10
   max_framerate: 1 fps
-  idle_framerate: 0.2 fps
+  idle_framerate: 0 fps
   frame_buffer_location: PSRAM
   vertical_flip: false
   horizontal_mirror: false

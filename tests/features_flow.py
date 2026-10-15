@@ -62,6 +62,7 @@ public:
  Sensor changes,flows,value,confidence;Sensor *change_=&changes,*flow_=&flows,*value_=&value,*confidence_sensor_=&confidence,*digit_sensors_[8]{};Text *last_update_=nullptr,*status_sensor_=nullptr,*error_sensor_=nullptr;
  bool confidence_pending_=false;uint32_t confidence_finished_at_=0,mqtt_state_at_=0;uint8_t mqtt_discovery_index_=0;
  Sensor age;Sensor *age_sensor_=&age;Binary stale;Binary *stale_sensor_=&stale;Reader reader;Reader *reader_=&reader;
+ struct Power{bool standby=true,weak=false;bool standby_enabled(){return standby;}bool weak_drive(){return weak;}bool configure(bool s,bool w){standby=s;weak=w;return true;}}camera_power_;
  AutofocusSettings autofocus_settings_{};Pref autofocus_preference_;
  Pref illumination_preference_,runtime_preference_;Configuration saved{};
  uint16_t led_capacity_()const{return 64;}bool save_configuration_(const Settings &s,const AlignmentReference&a,bool){saved.settings=s;saved.alignment=a;return true;}
@@ -82,7 +83,7 @@ int main(){
  MeterSetup restored;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.settings_.baseline==1864266&&restored.runtime_.warning_after==600&&restored.illumination_settings_.led_count==6&&restored.paused_&&restored.config_revision_==1&&!restored.autofocus_settings_.before_reading);
  assert(memcmp(restored.alignment_.pixels,original.alignment_.pixels,sizeof(original.alignment_.pixels))==0&&restored.reader.zones.find("[20,100,50,150]")!=std::string::npos);
  auto corrupt=[&](const char *field,auto value){JsonDocument d;deserializeJson(d,original.export_json_);d[field]=value;std::string data;serializeJson(d,data);restored.pending_import_=data;restored.import_config_();assert(restored.config_revision_==1&&restored.settings_.baseline==1864266&&restored.message_.find("abgelehnt")!=std::string::npos);};
- corrupt("autofocus_before_reading",1);corrupt("version",2);corrupt("camera_width",320);corrupt("warning_after",0);
+ corrupt("camera_standby",1);corrupt("camera_weak_drive","yes");corrupt("autofocus_before_reading",1);corrupt("version",2);corrupt("camera_width",320);corrupt("warning_after",0);
  restored.illumination_preference_.fail_next=true;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.config_revision_==1&&restored.saved.settings.baseline==1864266&&restored.message_.find("fehlgeschlagen")!=std::string::npos);
  restored.pending_=restored.settings_;restored.pending_alignment_=restored.alignment_;restored.pending_warning_after_=900;restored.runtime_preference_.fail_next=true;restored.apply_save_();assert(restored.runtime_.warning_after==600&&restored.message_.find("Warnschwelle")!=std::string::npos);restored.apply_save_();assert(restored.runtime_.warning_after==900&&restored.message_=="Gespeichert");
  const std::string log="[I] Result: VALID (Raw: 01864266, Conf: 0.980, [0.992, 0.992, 0.992, 0.973, 0.934, 0.992, 0.996, 0.969])";
@@ -100,7 +101,7 @@ int main(){
  JsonDocument state;deserializeJson(state,mqtt::client.messages[1].payload);assert(state["confidence_5"].as<float>()>93&&state["value"].isNull());
  restored.mqtt_loop_();assert(mqtt::client.messages.size()==21);restored.test_=true;++restored.preview_sequence_;restored.mqtt_loop_();assert(mqtt::client.messages.size()==21);restored.test_=false;mqtt::client.success=false;restored.mqtt_loop_();assert(restored.mqtt_image_sequence_==1);mqtt::client.success=true;restored.mqtt_loop_();assert(mqtt::client.messages.size()==22);
  mqtt::client.connected=false;restored.mqtt_loop_();assert(restored.mqtt_discovery_index_==0&&!restored.mqtt_discovered_);mqtt::client.connected=true;restored.mqtt_loop_();assert(restored.mqtt_discovery_index_==1);
- JsonDocument old_backup;deserializeJson(old_backup,original.export_json_);old_backup.remove("autofocus_before_reading");MeterSetup legacy;serializeJson(old_backup,legacy.pending_import_);legacy.import_config_();assert(legacy.config_revision_==1&&legacy.autofocus_settings_.before_reading==1);
+ JsonDocument old_backup;deserializeJson(old_backup,original.export_json_);old_backup.remove("autofocus_before_reading");old_backup.remove("camera_standby");old_backup.remove("camera_weak_drive");MeterSetup legacy;legacy.camera_power_.standby=false;legacy.camera_power_.weak=true;serializeJson(old_backup,legacy.pending_import_);legacy.import_config_();assert(legacy.config_revision_==1&&legacy.autofocus_settings_.before_reading==1&&!legacy.camera_power_.standby_enabled()&&legacy.camera_power_.weak_drive());
  MeterSetup failed_focus_save;failed_focus_save.pending_import_=original.export_json_;failed_focus_save.autofocus_preference_.fail_next=true;failed_focus_save.import_config_();assert(failed_focus_save.config_revision_==0&&failed_focus_save.autofocus_settings_.before_reading==1&&failed_focus_save.saved.settings.baseline==0);
  std::cout<<"Features passed: backup/reference roundtrip, strict validation/rollback, per-digit matching, age warning/recovery, camera discovery/MAC, binary JPEG/retain/retry/test isolation\n";
 }

@@ -33,6 +33,7 @@ int main(){
  AutofocusController af;supported=false;assert(!af.start()&&af.state()==AutofocusController::UNSUPPORTED&&!pending);
  supported=true;assert(af.start()&&af.state()==AutofocusController::RUNNING);assert(!af.start());run();assert(af.state()==AutofocusController::FOCUSED&&init_calls==1&&trigger_calls==1&&tick==100);
  assert(af.start());run();assert(af.state()==AutofocusController::FOCUSED&&init_calls==1&&trigger_calls==2);
+ auto previous_init=init_calls;af.invalidate();assert(af.start());run();assert(init_calls==previous_init+1);
  focus_ok=false;assert(af.start());auto began=tick;run();assert(af.state()==AutofocusController::FAILED&&af.error()==ESP_ERR_TIMEOUT&&tick-began==4000);
  focus_ok=true;trigger_error=ESP_FAIL;assert(af.start());run();assert(af.state()==AutofocusController::FAILED);trigger_error=0;
  allocation_ok=false;assert(!af.start()&&af.error()==ESP_ERR_NO_MEM&&af.state()==AutofocusController::FAILED);allocation_ok=true;

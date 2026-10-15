@@ -9,6 +9,7 @@ void MeterSetup::autofocus_setup_() {
 bool MeterSetup::start_autofocus_() {
   if(!autofocus_once_&&(!capture_inference_||!autofocus_settings_.before_reading||!autofocus_.supported()))return false;
   autofocus_once_=false;autofocus_used_=true;
+  if(autofocus_power_generation_!=camera_power_.generation()){autofocus_.invalidate();autofocus_power_generation_=camera_power_.generation();}
   if(!autofocus_.start()){autofocus_failed_("Autofokus konnte nicht gestartet werden");return true;}
   capture_stage_=3;autofocus_status_="Fokussierung läuft";message_="Fokussierung läuft …";return true;
 }

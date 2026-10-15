@@ -81,6 +81,8 @@ async def to_code(config):
         CORE.component_ids.add(config['timestamp_camera_id'].id)
     public_camera = cg.Pvariable(config['timestamp_camera_id'], cg.RawExpression(f"meter_setup::TimestampCamera::install({physical_camera})"))
     await cg.register_component(public_camera, {})
+    cg.add(physical_camera.set_idle_update_interval(0))
+    cg.add(public_camera.set_power(var.get_camera_power()))
     reader = await cg.get_variable(config['reader_id'])
     cg.add(reader.set_alignment_owner(var))
     cg.add(var.set_value(await sensor.new_sensor(config['value'])))

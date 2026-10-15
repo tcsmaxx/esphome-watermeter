@@ -9,11 +9,12 @@ source=scope['source'];source=source[:source.index('int main()')]
 source=source.replace(' AutofocusSettings autofocus_settings_{1,0};bool autofocus_once_=false,autofocus_used_=false;struct AF{bool supported(){return false;}}autofocus_;bool start_autofocus_(){return false;}void autofocus_loop_(){}', ''' AutofocusSettings autofocus_settings_{};bool autofocus_once_=false,autofocus_used_=false;AutofocusController autofocus_;
  ESPPreferenceObject autofocus_preference_;std::string autofocus_status_;bool reboot_pending_=false,paused_=false;uint32_t reboot_at_=0;int faults=0;
  void autofocus_setup_();bool start_autofocus_();void autofocus_loop_();void autofocus_failed_(const char*);void record_fault_(const std::string&,bool automatic){assert(automatic);++faults;}''')
-source=source.replace('class MeterSetup {', '''struct AutofocusController {enum State{IDLE,RUNNING,FOCUSED,FAILED,HUNG};State value=IDLE;bool available=true,start_ok=true;int starts=0;bool supported(){return available;}bool start(){++starts;value=RUNNING;return start_ok;}State state(){return value;}};
+source=source.replace('class MeterSetup {', '''struct AutofocusController {enum State{IDLE,RUNNING,FOCUSED,FAILED,HUNG};State value=IDLE;bool available=true,start_ok=true;int starts=0;void invalidate(){}bool supported(){return available;}bool start(){++starts;value=RUNNING;return start_ok;}State state(){return value;}};
 class MeterSetup {''')
 cpp=(root/'components/meter_setup/autofocus_flow.cpp').read_text();source+=cpp[cpp.index('void MeterSetup::autofocus_setup_()'):cpp.rfind('\n}')]
 source+=r'''
 int main(){
+ MeterSetup sleepy;sleepy.camera_power_.available=true;sleepy.camera_power_.awake=false;sleepy.begin_capture_(true);sleepy.illumination_loop_();assert(sleepy.capture_stage_==0&&sleepy.reader.paused&&sleepy.autofocus_.starts==0&&sleepy.camera_power_.requests==1);sleepy.camera_power_.awake=true;sleepy.illumination_loop_();assert(sleepy.capture_stage_==3&&sleepy.autofocus_.starts==1);
  MeterSetup af;af.settings_.interval=60;af.busy_=true;af.illumination_settings_.enabled=1;af.illumination_settings_.settle_ms=200;light::LightState lamp;af.illumination_=&lamp;
  af.begin_capture_(true);assert(af.capture_stage_==0&&lamp.on&&af.reader.paused);now+=199;af.illumination_loop_();assert(af.autofocus_.starts==0);now+=1;af.illumination_loop_();assert(af.autofocus_.starts==1&&af.capture_stage_==3&&af.capture_pending_&&af.reader.paused);
  auto frame=std::make_shared<camera::CameraImage>();af.on_camera_image(frame);assert(af.frame_==0);af.illumination_loop_();assert(af.capture_stage_==3&&af.camera.requests==0);
