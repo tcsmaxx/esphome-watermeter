@@ -3,7 +3,7 @@ from esphome.core import CORE, ID
 from esphome.coroutine import CoroPriority, coroutine_with_priority
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import esp32_camera, meter_reader_tflite, sensor, text_sensor, binary_sensor, web_server_base, light
+from esphome.components import esp32, esp32_camera, meter_reader_tflite, sensor, text_sensor, binary_sensor, web_server_base, light
 from esphome.const import CONF_ID
 AUTO_LOAD = ['json', 'button', 'light', 'binary_sensor', 'text_sensor', 'sensor']
 DEPENDENCIES = ['esp32_camera', 'meter_reader_tflite', 'web_server']
@@ -56,6 +56,8 @@ def add_dashboard_navigation():
 @coroutine_with_priority(CoroPriority.WEB + 1)
 async def to_code(config):
     add_dashboard_navigation()
+    esp32.add_idf_sdkconfig_option("CONFIG_OV5640_SUPPORT", True)
+    esp32.add_idf_sdkconfig_option("CONFIG_CAMERA_AF_SUPPORT", True)
     cg.add_define("USE_LOG_LISTENERS")
     # Construct the existing reader as a subclass; keep all upstream schema/model settings.
     reader_config = CORE.config['meter_reader_tflite']

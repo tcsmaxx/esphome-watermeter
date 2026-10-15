@@ -52,6 +52,7 @@ class MeterSetup {
  public:
 '''+fields+r'''
  Camera camera;Camera *camera_=&camera;AlignedMeterReader reader;Reader *reader_=&reader;
+ AutofocusSettings autofocus_settings_{1,0};bool autofocus_once_=false,autofocus_used_=false;struct AF{bool supported(){return false;}}autofocus_;bool start_autofocus_(){return false;}void autofocus_loop_(){}
  Settings settings_;std::mutex mutex_;bool busy_=false,test_=false,reading_problem_=false;std::string message_,reading_error_;
  uint32_t next_=0,frame_=0;std::shared_ptr<uint8_t> jpeg_;size_t jpeg_size_=0;
  void load_(){

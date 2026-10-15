@@ -202,6 +202,7 @@ void MeterSetup::setup() {
   }
   next_=millis()+recovery_delay_ms_;
   status_json_=status_();
+  autofocus_setup_();
   features_setup_();
   server_->add_handler(this);
   ESP_LOGI("meter_setup", "Loop task %s, configured stack %u bytes", pcTaskGetName(nullptr), ESPHOME_LOOP_TASK_STACK_SIZE);
@@ -209,7 +210,7 @@ void MeterSetup::setup() {
 void MeterSetup::on_camera_image(const std::shared_ptr<camera::CameraImage> &image) {
   {
     std::lock_guard<std::mutex> guard(mutex_);
-    if(capture_pending_ && capture_stage_<2) {if(capture_stage_==1) flush_received_=true;return;}
+    if(capture_pending_ && capture_stage_!=2) {if(capture_stage_==1) flush_received_=true;return;}
   }
   const size_t len=image->get_data_length();
   if(len>160000) return;
@@ -279,6 +280,7 @@ void MeterSetup::reset_illumination_() {
   pending_illumination_=illumination_settings_;
 }
 void MeterSetup::begin_capture_(bool inference) {
+  autofocus_used_=false;
   capture_inference_=inference;capture_started_=millis();inference_started_=false;
   capture_pending_=true;flush_received_=false;
   const bool automatic_light=illumination_ && (illumination_settings_.enabled || light_test_);
@@ -286,6 +288,8 @@ void MeterSetup::begin_capture_(bool inference) {
   if(automatic_light) {
     set_illumination_(true,lighting);
     capture_stage_=0;capture_deadline_=millis()+lighting.settle_ms;
+  } else if(autofocus_once_||(inference&&autofocus_settings_.before_reading&&autofocus_.supported())) {
+    capture_stage_=0;capture_deadline_=millis();
   } else {
     capture_stage_=2;
     if(inference) {
@@ -297,17 +301,19 @@ void MeterSetup::begin_capture_(bool inference) {
   }
 }
 void MeterSetup::illumination_loop_() {
+  autofocus_loop_();
   if(light_test_ && int32_t(millis()-light_test_deadline_)>=0) {
     light_test_=false;if(!busy_ && !capture_pending_)set_illumination_(false,illumination_settings_);
   }
   if(!capture_pending_) return;
-  if(millis()-capture_started_>15000) {
+  if(millis()-capture_started_>(autofocus_used_?25000U:15000U)) {
     capture_pending_=false;busy_=false;inference_started_=false;reader_->set_pause_processing(true);
     set_illumination_(light_test_,pending_illumination_);message_="Kamerabild ausgeblieben";
     if(capture_inference_ && !test_) {reading_problem_=true;reading_error_=message_;}
     next_=millis()+settings_.interval*1000;return;
   }
   if(capture_stage_==0 && int32_t(millis()-capture_deadline_)>=0) {
+    if(start_autofocus_())return;
     capture_stage_=1;camera_->request_image(camera::WEB_REQUESTER);
   } else if(capture_stage_==1 && flush_received_) {
     capture_stage_=2;
@@ -336,8 +342,14 @@ void MeterSetup::loop() {
   }
   recovery_loop_();
   if(reboot_pending_) {diagnostics_();if(millis()-status_updated_>=250){status_json_=status_();status_updated_=millis();}return;}
+  if(cmd==FOCUS_SAVE) {
+    const auto old=autofocus_settings_;autofocus_settings_.before_reading=pending_autofocus_;
+    if(autofocus_preference_.save(&autofocus_settings_)&&global_preferences->sync()){message_="Fokuseinstellung gespeichert";build_export_();}
+    else {autofocus_settings_=old;autofocus_preference_.save(&old);global_preferences->sync();message_="Fokuseinstellung konnte nicht gespeichert werden";}
+  }
+  if(cmd==FOCUS){paused_=true;autofocus_once_=true;message_="Autofokus wird vorbereitet …";begin_capture_(false);}
   if(cmd==IMPORT && !busy_)import_config_();
-  if(cmd==RESET && !busy_) {reset_();runtime_.last_valid_epoch=0;runtime_.warning_after=300;runtime_preference_.save(&runtime_);global_preferences->sync();build_export_();}
+  if(cmd==RESET && !busy_) {autofocus_settings_=AutofocusSettings{};autofocus_preference_.save(&autofocus_settings_);reset_();runtime_.last_valid_epoch=0;runtime_.warning_after=300;runtime_preference_.save(&runtime_);global_preferences->sync();build_export_();}
   if(cmd==REFERENCE && !busy_) capture_references_();
   if(cmd==CAPTURE) {message_="Kamerabild wird aufgenommen …";begin_capture_(false);}
   if(cmd==LIGHT_SAVE) {
@@ -485,6 +497,10 @@ std::string MeterSetup::status_() {
   out+=",\"loop_stack_size\":"; out+=std::to_string(ESPHOME_LOOP_TASK_STACK_SIZE);
   out+=",\"loop_stack_free\":"; out+=std::to_string(uxTaskGetStackHighWaterMark(nullptr));
   out+=",\"http_stack_free\":"; out+=std::to_string(http_stack_free_);
+  out+=",\"autofocus_available\":";out+=autofocus_.supported()?"true":"false";
+  out+=",\"autofocus_before_reading\":";out+=autofocus_settings_.before_reading?"true":"false";
+  out+=",\"autofocus_status\":";out+=quote(autofocus_status_);
+  out+=",\"autofocus_error\":";out+=std::to_string(autofocus_.error());
   out+=",\"illumination_available\":";out+=illumination_?"true":"false";
   out+=",\"illumination_led_count\":";out+=std::to_string(illumination_settings_.led_count);
   out+=",\"illumination_led_capacity\":";out+=std::to_string(led_capacity_());
@@ -563,6 +579,16 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     command_=RESTART;r->send(200,"text/plain; charset=utf-8","Neustart vorgemerkt");return;
   }
   if(command_!=NONE || ((busy_ || capture_pending_) && url!="/meter/pause")) {r->send(409,"text/plain","Bitte laufende Aktion abwarten");return;}
+  if(url=="/meter/focus" || url=="/meter/focus_save") {
+    if(url=="/meter/focus"){
+      if(!autofocus_.supported()){r->send(400,"text/plain; charset=utf-8","Autofokus wird von dieser Kamera nicht unterstützt");return;}
+      command_=FOCUS;
+    } else {
+      if(!r->hasParam("enabled")||(r->getParam("enabled")->value()!="0"&&r->getParam("enabled")->value()!="1")){r->send(400,"text/plain","enabled: 0 oder 1 erforderlich");return;}
+      pending_autofocus_=r->getParam("enabled")->value()=="1";command_=FOCUS_SAVE;
+    }
+    r->send(200,"text/plain; charset=utf-8","Fokusaktion vorgemerkt");return;
+  }
   if(url=="/meter/import") {
     if(!r->hasParam("data") || r->getParam("data")->value().size()>4096) {r->send(400,"text/plain","Sicherung fehlt oder zu groß");return;}
     pending_import_=r->getParam("data")->value();command_=IMPORT;r->send(200,"text/plain","Import wird geprüft");return;
@@ -656,6 +682,7 @@ void MeterSetup::set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,b
 }
 // Recovery keeps the worker isolated until a reboot; never reuse an unknown live job.
 std::string MeterSetup::reader_phase_() const {
+  if(capture_pending_&&capture_stage_==3)return "autofocus";
   if(capture_pending_)return capture_stage_==0?"light_warmup":capture_stage_==1?"flush_frame":"snapshot";
   const std::string phase=static_cast<AlignedMeterReader *>(reader_)->phase();
   return inference_started_ && phase=="idle"?"awaiting_result":phase;

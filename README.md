@@ -1,6 +1,6 @@
 # ESPHome Watermeter
 
-Lokale Wasserzähler-Erkennung für den **Seeed Studio XIAO ESP32-S3 Sense mit OV3660**. Die Kamera erfasst mechanische Ziffernrollen; TensorFlow Lite Micro erkennt die einzelnen Stellen direkt auf dem ESP32. Der bestätigte Zählerstand und Diagnosewerte werden über die verschlüsselte ESPHome-API an Home Assistant übertragen.
+Lokale Wasserzähler-Erkennung für den **Seeed Studio XIAO ESP32-S3 Sense mit OV3660 oder OV5640**. Die Kamera erfasst mechanische Ziffernrollen; TensorFlow Lite Micro erkennt die einzelnen Stellen direkt auf dem ESP32. Der bestätigte Zählerstand und Diagnosewerte werden über die verschlüsselte ESPHome-API an Home Assistant übertragen.
 
 Die integrierte Weboberfläche ermöglicht Einrichtung, Kalibrierung und Betrieb ohne Ziffernkoordinaten in YAML. Bildverarbeitung, Referenzsuche und Erkennung laufen auf dem Gerät. Für den Betrieb sind weder ein externer KI-Server noch Cloud-Dienste erforderlich.
 
@@ -218,6 +218,20 @@ In einer eigenen YAML diesen Eintrag unter dem vorhandenen `button:`-Block ergä
 Der letzte Kamera- oder Inferenzfehler bleibt in der Setup-Diagnose und unter `/meter/status` nachvollziehbar. Erfasst werden Ursache, Zeitpunkt, Betriebsdauer, Reader-Phase, letzte Reader-Meldung, Ausrichtungsergebnis, Bildnummer sowie freier interner Heap und PSRAM. Automatische Neustarts und aufeinanderfolgende Zeitüberschreitungen werden gezählt. Die Diagnose wird vor einem automatischen Neustart im Flash gespeichert und nach dem Start im Log ausgegeben. Erfolgreiche Messungen löschen den letzten gespeicherten Fehler nicht.
 
 Der automatische Neustart behandelt Fehler bei weiterhin laufendem Hauptloop. Bei komplett ausgefallenem Gerät, fehlender Versorgung oder nicht erreichbarem WLAN ist ein unabhängiger Fernschalter für die Stromversorgung nötig; OTA und Software-Neustart benötigen eine erreichbare Firmware.
+
+## OV5640 mit Autofokus
+
+Unterstützt wird das Seeed-Modul **OV5640 Camera for XIAO ESP32S3 Sense (With Heat Sink), SKU 114993115**. Die Kamerapins und die Auflösung **640 × 480** bleiben bestehen. Die Komponente aktiviert die native Autofokus-Unterstützung des Kameratreibers beim Kompilieren; eine zusätzliche YAML-Option ist nicht erforderlich. Die OV3660 funktioniert ohne Fokusmotor weiter wie bisher.
+
+Im Setup befindet sich der Abschnitt **Autofokus · OV5640**:
+
+- **Jetzt fokussieren** pausiert die automatische Ablesung, verwendet den gespeicherten Beleuchtungsvorlauf, fokussiert einmal und nimmt anschließend ein neues Vorschaubild auf. Danach mit **Fortsetzen** die Automatik wieder starten.
+- **Vor jeder Ablesung einmal fokussieren** ist standardmäßig aktiv und lässt sich mit **Fokus speichern** dauerhaft ändern. Ausgeschaltet bleibt die zuletzt eingestellte Linsenposition bis zum nächsten manuellen Fokuslauf bzw. zum Neustart erhalten; die mechanische Position ist nicht als Konfigurationswert gespeichert.
+- Der Fokusstatus wird im Setup und in `/meter/status` angezeigt (`autofocus_available`, `autofocus_before_reading`, `autofocus_status`, `autofocus_error`).
+
+Der Ablauf ist **Lichtvorlauf → Einzelfokus → veralteten Kamerapuffer verwerfen → frisches Bild → Ausrichtung und OCR**. Es wird kein kontinuierlicher Autofokus aktiviert. Firmware-Initialisierung und Treiberaufrufe laufen in einer separaten Aufgabe mit 5 KiB Stack. Die eigentliche Scharfstellung wird höchstens vier Sekunden geprüft; die gesamte Fokusaufgabe hat ein Zeitlimit von 15 Sekunden. Ein normaler Fokusfehler verwirft die Aufnahme und plant den nächsten Ableseversuch, ohne einen Zählerstand zu übernehmen. Eine hängende Fokusaufgabe wird isoliert und löst nach fünf Sekunden einen protokollierten Neustart aus.
+
+Die Option wird exportiert und importiert. Sicherungen ohne dieses Feld bleiben kompatibel und behalten die aktuelle Fokuseinstellung bei. Nach einem Kameratausch die Ziffernrahmen prüfen und Referenzen neu aufnehmen. Bei fehlendem Fokus Beleuchtung, Kamerabstand und freie Sicht auf die Ziffern kontrollieren.
 
 ## MQTT und zweite Home-Assistant-Instanz
 

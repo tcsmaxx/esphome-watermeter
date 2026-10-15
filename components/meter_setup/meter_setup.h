@@ -4,6 +4,7 @@
 #include <cmath>
 #include <ctime>
 #include "timestamp_camera.h"
+#include "autofocus.h"
 #include "alignment.h"
 #include "esphome/components/light/addressable_light_effect.h"
 #include "esp_heap_caps.h"
@@ -28,6 +29,7 @@ struct Configuration {
   Settings settings{};
   AlignmentReference alignment{};
 };
+struct AutofocusSettings {uint32_t version{1};uint8_t before_reading{1};};
 struct RuntimeSettings {
   uint32_t version{1}, warning_after{300}, last_valid_epoch{0};
 };
@@ -93,6 +95,15 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   bool save_configuration_(const Settings &settings,const AlignmentReference &alignment,bool flush);
   bool capture_references_();
   void begin_capture_(bool inference);
+  void autofocus_setup_();
+  bool start_autofocus_();
+  void autofocus_loop_();
+  void autofocus_failed_(const char *reason);
+  AutofocusController autofocus_;
+  AutofocusSettings autofocus_settings_{};
+  ESPPreferenceObject autofocus_preference_;
+  bool autofocus_once_{false},autofocus_used_{false},pending_autofocus_{true};
+  std::string autofocus_status_{"Noch nicht fokussiert"};
   void illumination_loop_();
   void set_illumination_(bool on,const IlluminationSettings &settings);
   bool save_illumination_(const IlluminationSettings &settings);
@@ -175,7 +186,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
   float confidence_{0};
   bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
-  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT } command_{NONE};
+  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE } command_{NONE};
   bool paused_{true};
 };
 class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {

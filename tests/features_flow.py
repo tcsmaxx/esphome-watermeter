@@ -62,6 +62,7 @@ public:
  Sensor changes,flows,value,confidence;Sensor *change_=&changes,*flow_=&flows,*value_=&value,*confidence_sensor_=&confidence,*digit_sensors_[8]{};Text *last_update_=nullptr,*status_sensor_=nullptr,*error_sensor_=nullptr;
  bool confidence_pending_=false;uint32_t confidence_finished_at_=0,mqtt_state_at_=0;uint8_t mqtt_discovery_index_=0;
  Sensor age;Sensor *age_sensor_=&age;Binary stale;Binary *stale_sensor_=&stale;Reader reader;Reader *reader_=&reader;
+ AutofocusSettings autofocus_settings_{};Pref autofocus_preference_;
  Pref illumination_preference_,runtime_preference_;Configuration saved{};
  uint16_t led_capacity_()const{return 64;}bool save_configuration_(const Settings &s,const AlignmentReference&a,bool){saved.settings=s;saved.alignment=a;return true;}
  void set_illumination_(bool,const IlluminationSettings&){}
@@ -74,14 +75,14 @@ public:
 };
 '''+validation+methods+r'''
 int main(){
- MeterSetup original;original.settings_.calibrated=1;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.illumination_settings_.led_count=6;
+ MeterSetup original;original.settings_.calibrated=1;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.illumination_settings_.led_count=6;
  for(int i=0;i<8;i++){auto &b=original.settings_.boxes[i];b[0]=20+i*50;b[1]=100;b[2]=b[0]+30;b[3]=150;}
  original.alignment_.enabled=original.alignment_.ready=1;uint16_t regions[2][4]={{100,200,132,232},{450,200,482,232}};memcpy(original.alignment_.regions,regions,sizeof(regions));for(auto &row:original.alignment_.pixels)for(int i=0;i<256;i++)row[i]=i%2?20:200;
  original.build_export_();assert(original.export_json_.size()<3000);assert(original.export_json_.find("password")==std::string::npos);
- MeterSetup restored;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.settings_.baseline==1864266&&restored.runtime_.warning_after==600&&restored.illumination_settings_.led_count==6&&restored.paused_&&restored.config_revision_==1);
+ MeterSetup restored;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.settings_.baseline==1864266&&restored.runtime_.warning_after==600&&restored.illumination_settings_.led_count==6&&restored.paused_&&restored.config_revision_==1&&!restored.autofocus_settings_.before_reading);
  assert(memcmp(restored.alignment_.pixels,original.alignment_.pixels,sizeof(original.alignment_.pixels))==0&&restored.reader.zones.find("[20,100,50,150]")!=std::string::npos);
  auto corrupt=[&](const char *field,auto value){JsonDocument d;deserializeJson(d,original.export_json_);d[field]=value;std::string data;serializeJson(d,data);restored.pending_import_=data;restored.import_config_();assert(restored.config_revision_==1&&restored.settings_.baseline==1864266&&restored.message_.find("abgelehnt")!=std::string::npos);};
- corrupt("version",2);corrupt("camera_width",320);corrupt("warning_after",0);
+ corrupt("autofocus_before_reading",1);corrupt("version",2);corrupt("camera_width",320);corrupt("warning_after",0);
  restored.illumination_preference_.fail_next=true;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.config_revision_==1&&restored.saved.settings.baseline==1864266&&restored.message_.find("fehlgeschlagen")!=std::string::npos);
  restored.pending_=restored.settings_;restored.pending_alignment_=restored.alignment_;restored.pending_warning_after_=900;restored.runtime_preference_.fail_next=true;restored.apply_save_();assert(restored.runtime_.warning_after==600&&restored.message_.find("Warnschwelle")!=std::string::npos);restored.apply_save_();assert(restored.runtime_.warning_after==900&&restored.message_=="Gespeichert");
  const std::string log="[I] Result: VALID (Raw: 01864266, Conf: 0.980, [0.992, 0.992, 0.992, 0.973, 0.934, 0.992, 0.996, 0.969])";
@@ -99,6 +100,8 @@ int main(){
  JsonDocument state;deserializeJson(state,mqtt::client.messages[1].payload);assert(state["confidence_5"].as<float>()>93&&state["value"].isNull());
  restored.mqtt_loop_();assert(mqtt::client.messages.size()==21);restored.test_=true;++restored.preview_sequence_;restored.mqtt_loop_();assert(mqtt::client.messages.size()==21);restored.test_=false;mqtt::client.success=false;restored.mqtt_loop_();assert(restored.mqtt_image_sequence_==1);mqtt::client.success=true;restored.mqtt_loop_();assert(mqtt::client.messages.size()==22);
  mqtt::client.connected=false;restored.mqtt_loop_();assert(restored.mqtt_discovery_index_==0&&!restored.mqtt_discovered_);mqtt::client.connected=true;restored.mqtt_loop_();assert(restored.mqtt_discovery_index_==1);
+ JsonDocument old_backup;deserializeJson(old_backup,original.export_json_);old_backup.remove("autofocus_before_reading");MeterSetup legacy;serializeJson(old_backup,legacy.pending_import_);legacy.import_config_();assert(legacy.config_revision_==1&&legacy.autofocus_settings_.before_reading==1);
+ MeterSetup failed_focus_save;failed_focus_save.pending_import_=original.export_json_;failed_focus_save.autofocus_preference_.fail_next=true;failed_focus_save.import_config_();assert(failed_focus_save.config_revision_==0&&failed_focus_save.autofocus_settings_.before_reading==1&&failed_focus_save.saved.settings.baseline==0);
  std::cout<<"Features passed: backup/reference roundtrip, strict validation/rollback, per-digit matching, age warning/recovery, camera discovery/MAC, binary JPEG/retain/retry/test isolation\n";
 }
 '''
