@@ -585,7 +585,8 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   std::string url(r->url_to(url_buf).c_str());
   if(url=="/setup" && r->method()==HTTP_GET) {
-    auto *response=r->beginResponse(200,"text/html; charset=utf-8",WEB_UI);
+    auto *response=r->beginResponse(200,"text/html; charset=utf-8",
+                                    reinterpret_cast<const uint8_t *>(WEB_UI),sizeof(WEB_UI)-1);
     response->addHeader("Cache-Control","no-store");r->send(response);return;
   }
   if(url=="/meter/status" && r->method()==HTTP_GET) {
