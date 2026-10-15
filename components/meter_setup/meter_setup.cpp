@@ -400,7 +400,7 @@ void MeterSetup::loop() {
   if(!busy_ && !capture_pending_ && !light_test_ && !paused_ && settings_.calibrated && int32_t(millis()-next_)>=0) start_(false);
   features_loop_();
   diagnostics_();
-  if(millis()-status_updated_>=250) {
+  if(cmd!=NONE || millis()-status_updated_>=250) {
     update_status_();
     status_updated_=millis();
   }
@@ -500,6 +500,10 @@ std::string MeterSetup::status_() {
   out+=",\"calibrated\":"; out+=settings_.calibrated?"true":"false";
   out+=",\"live\":";out+=live_?"true":"false";
   out+=",\"live_remaining\":";out+=std::to_string(live_&&int32_t(live_deadline_-millis())>0?(live_deadline_-millis()+999)/1000:0);
+  out+=",\"command_pending\":";out+=command_!=NONE?"true":"false";
+  out+=",\"capture_pending\":";out+=capture_pending_?"true":"false";
+  out+=",\"capture_stage\":";out+=std::to_string(capture_stage_);
+  out+=",\"busy_ms\":";out+=std::to_string(capture_pending_?millis()-capture_started_:busy_?millis()-started_:0);
   out+=",\"busy\":"; out+=(busy_||capture_pending_)?"true":"false";
   out+=",\"paused\":"; out+=paused_?"true":"false";
   out+=",\"frame\":"; out+=std::to_string(frame_);
@@ -580,7 +584,10 @@ void MeterSetup::stop_live_() {
 void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
   std::string url(r->url_to(url_buf).c_str());
-  if(url=="/setup" && r->method()==HTTP_GET) { r->send(200,"text/html; charset=utf-8",WEB_UI); return; }
+  if(url=="/setup" && r->method()==HTTP_GET) {
+    auto *response=r->beginResponse(200,"text/html; charset=utf-8",WEB_UI);
+    response->addHeader("Cache-Control","no-store");r->send(response);return;
+  }
   if(url=="/meter/status" && r->method()==HTTP_GET) {
     std::unique_lock<std::mutex> guard(status_mutex_);
     http_stack_free_=uxTaskGetStackHighWaterMark(nullptr);

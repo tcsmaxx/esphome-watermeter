@@ -26,6 +26,7 @@ class MeterSetup {
  public:
  Settings settings_{}; AlignmentReference alignment_{},draft_alignment_{}; uint32_t reference_revision_=0,alignment_ms_=0;std::string alignment_result_="Ausgeschaltet";
  bool busy_=false,paused_=true,capture_pending_=false,illumination_on_=false,light_test_=false;void *illumination_=nullptr;IlluminationSettings illumination_settings_{};
+ enum{NONE};int command_=NONE;uint8_t capture_stage_=0;uint32_t capture_started_=0,started_=0;
  bool live_=false;uint32_t live_deadline_=0;
  uint32_t frame_=12,http_stack_free_=1200,reset_count_=0;
  std::string digits_="00123456",message_="Test \"ok\"",http_task_name_="httpd";

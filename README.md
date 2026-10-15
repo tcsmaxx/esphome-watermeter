@@ -225,7 +225,7 @@ Der automatische Neustart behandelt Fehler bei weiterhin laufendem Hauptloop. Be
 
 **Livebild stoppen** oder das Zeitlimit von zwei Minuten beenden den Stream und stellen den vorherigen Automatikzustand wieder her. Bleiben nach dem Streamstart zehn Sekunden lang neue Bilder aus, wird der Debugbetrieb beendet. Auch bei Verbindungsabbruch endet er spätestens am Zeitlimit. Native Home-Assistant-Streams sind davon unabhängig.
 
-Die Statuszeile zeigt Aufwecken, Lichtvorlauf, Fokus, Pufferwechsel, Aufnahme und Erkennung. Klicks erhalten unmittelbar eine Rückmeldung; Statusabfragen verwenden einen getrennt geschützten Zwischenspeicher und warten nicht auf die Bildverarbeitung. `/meter/status` ergänzt `live` und `live_remaining` (Sekunden).
+Die Statuszeile zeigt Aufwecken, Lichtvorlauf, Fokus, Pufferwechsel, Aufnahme und Erkennung samt verstrichener Zeit. Eine einzige Statusabfrage versorgt Anzeige und Aktionsbestätigung; Bildübertragungen laufen unabhängig davon und werden zusammengefasst. Weitere Aktionen werden direkt beim Klick gesperrt. Meldet das Gerät einen zwischenzeitlich gestarteten Vorgang, wartet die Aktion auf dessen Abschluss und wird anschließend erneut angefordert; dafür erscheint kein Popup. Statusabfragen verwenden einen getrennt geschützten Zwischenspeicher. `/meter/status` enthält außerdem `live`, `live_remaining` (Sekunden), `command_pending`, `capture_pending`, `capture_stage` und `busy_ms` für die Diagnose.
 
 
 ## Kamera-Standby und Wärme
