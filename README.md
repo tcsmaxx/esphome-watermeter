@@ -16,7 +16,7 @@ Die eigene Komponente **`meter_setup`** ergänzt diese Grundlage um eine abgesti
 | Bildausschnitte | Verarbeitung konfigurierter Ausschnitte | Rahmen direkt im Kamerabild zeichnen, verschieben und pixelgenau justieren |
 | Einrichtung | ESPHome-Komponenten und YAML-Konfiguration | Vollständige Web-Einrichtung auf dem ESP mit Kamerabild, Ausschnittvorschau und Testfunktion |
 | Speicherung | ESPHome-Präferenzen | Dauerhafte Speicherung von Rahmen, Stand, Intervall, Grenzwerten, Referenzen und Beleuchtung |
-| Bildgeometrie | Bildverarbeitung und konfigurierbare Rotation | Optionale automatische Ausrichtung anhand zweier gespeicherter Referenzmuster |
+| Bildgeometrie | Bildverarbeitung und konfigurierbare Rotation | Bilddrehung direkt in der Einrichtung sowie optionale automatische Ausrichtung anhand zweier gespeicherter Referenzmuster |
 | Plausibilitätsprüfung | Das Basisprojekt bietet unter anderem `value_validator` | Eigene Annahmelogik mit Ganzzahl-Rohwerten, Konfidenzprüfung, Rückwärts- und Sprungkontrolle |
 | Beleuchtung | Das Basisprojekt bietet unter anderem `flash_light_controller` | SK6812-RGBW-Steuerung mit LED-Anzahl, Weiß-Helligkeit, Vorlauf und zeitlich begrenztem Lichttest im Setup |
 | Home Assistant | ESPHome-API und Kamera | Bestätigter Stand, Änderung, Durchfluss, deutscher Zeitstempel, Status und Fehlermeldungen |
@@ -55,12 +55,14 @@ Auf großen Bildschirmen stehen die Einstellungen links und das Kamerabild recht
 
 ### Ziffernrahmen und Kalibrierung
 
-1. **Pausieren** und mit **Neues Bild** einen Kameraschnappschuss aufnehmen.
+1. **Pausieren** und mit **Neues Bild** einen Kameraschnappschuss aufnehmen. Unter **Bild gerade ausrichten** bei Bedarf zuerst mit den 90°-Tasten drehen und in 0,1°-Schritten nachjustieren. Danach Rahmen und Referenzen einzeichnen.
 2. Unter **Ausgewählte Stelle** eine Ziffer wählen und einen Rahmen um die vollständige Ziffer ziehen. Acht Rahmen von links nach rechts einrichten.
 3. Zum schnellen Verteilen zunächst für Stelle 1 die gesamte Ziffernreihe markieren und **8 Rahmen gleichmäßig verteilen** verwenden. Anschließend jede Stelle einzeln anpassen.
 4. **Rahmen testen** und alle erkannten Stellen mit dem Bild vergleichen.
 5. Den tatsächlichen Stand von Hand ablesen und als acht Ziffern ohne Komma eingeben: `00123,456 m³` entspricht `00123456`. Nachkommastellen, Ableseintervall und maximalen Sprung einstellen.
 6. **Speichern & Automatik starten** sichert die Konfiguration und aktiviert die regelmäßige Ablesung.
+
+Die Bilddrehung wird mit **Alle Einstellungen speichern** dauerhaft übernommen und auch in Sicherungen exportiert. Vorschau, Ziffernausschnitte und Erkennung verwenden dieselbe Drehung. Das ganze Bild wird in die Arbeitsfläche von 640 × 480 Pixeln eingepasst; schwarze Ränder sind normal. Wird die Drehung nachträglich verändert, werden die eingezeichneten Rahmen und Referenzen nach Bestätigung im Entwurf geleert und müssen neu gesetzt werden. Die automatische Referenzausrichtung arbeitet anschließend auf dem gedrehten Bild. Das originale Kamerabild in Home Assistant und im MQTT-Bild bleibt unverändert.
 
 Die Ausschnittvorschau zeigt jede Ziffer separat. Ein Klick auf einen Ausschnitt wählt den entsprechenden Rahmen aus. Unter **Bildansicht** lässt sich zwischen **Rohbild · Einrichtung** und **KI-Bild · Erkennung prüfen** umschalten. Im Werkzeug **Verschieben** lassen sich vorhandene Rahmen mit der Maus oder per Touch bewegen. X, Y, Breite und Höhe können direkt eingegeben oder in Schritten von 1, 5 oder 10 Pixeln angepasst werden. Pfeiltasten im fokussierten Kamerabild bewegen den Rahmen um einen Pixel; Umschalt + Pfeiltaste um zehn Pixel.
 

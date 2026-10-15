@@ -77,7 +77,7 @@ void MeterSetup::build_export_() {
   std::string pixels;pixels.reserve(1024);for(const auto &row:alignment_.pixels)for(uint8_t b:row){pixels+=hex[b>>4];pixels+=hex[b&15];}
   export_json_=json::build_json([&](JsonObject root){
     root["format"]="esphome-watermeter";root["version"]=1;root["camera_width"]=640;root["camera_height"]=480;root["warning_after"]=runtime_.warning_after;root["autofocus_before_reading"]=bool(autofocus_settings_.before_reading);root["manual_focus_enabled"]=bool(autofocus_settings_.manual_enabled);root["manual_focus_position"]=autofocus_settings_.position;root["camera_standby"]=camera_power_.standby_enabled();root["camera_weak_drive"]=camera_power_.weak_drive();
-    auto s=root["settings"].to<JsonObject>();s["baseline"]=settings_.baseline;s["max_step"]=settings_.max_step;s["interval"]=settings_.interval;s["decimals"]=settings_.decimals;s["calibrated"]=bool(settings_.calibrated);
+    auto s=root["settings"].to<JsonObject>();s["rotation_tenths"]=settings_.rotation_tenths;s["baseline"]=settings_.baseline;s["max_step"]=settings_.max_step;s["interval"]=settings_.interval;s["decimals"]=settings_.decimals;s["calibrated"]=bool(settings_.calibrated);
     auto boxes=s["boxes"].to<JsonArray>();for(const auto &box:settings_.boxes){auto row=boxes.add<JsonArray>();for(auto v:box)row.add(v);}
     auto a=root["alignment"].to<JsonObject>();a["enabled"]=bool(alignment_.enabled);a["ready"]=bool(alignment_.ready);a["pixels"]=pixels;
     auto regions=a["regions"].to<JsonArray>();for(const auto &box:alignment_.regions){auto row=regions.add<JsonArray>();for(auto v:box)row.add(v);}
@@ -102,6 +102,11 @@ void MeterSetup::import_config_() {
     if(!uint_value(root["warning_after"],30,86400,options.warning_after))return false;
     auto s=root["settings"].as<JsonObject>();uint32_t v;
     if(!s["calibrated"].is<bool>()||!uint_value(s["baseline"],0,99999999,cfg.baseline)||!uint_value(s["max_step"],1,99999999,cfg.max_step)||!uint_value(s["interval"],10,86400,cfg.interval)||!uint_value(s["decimals"],0,6,v))return false;
+    if(!s["rotation_tenths"].isNull()){
+      if(!s["rotation_tenths"].is<int32_t>())return false;
+      const auto angle=s["rotation_tenths"].as<int32_t>();if(angle < -1800||angle>1800)return false;cfg.rotation_tenths=angle;
+    }
+    refs.rotation_tenths=cfg.rotation_tenths;
     cfg.decimals=v;cfg.calibrated=s["calibrated"].as<bool>();auto boxes=s["boxes"].as<JsonArray>();if(boxes.size()!=8)return false;
     for(int i=0;i<8;i++){auto row=boxes[i].as<JsonArray>();if(row.size()!=4)return false;for(int j=0;j<4;j++){if(!uint_value(row[j],0,j%2?480:640,v))return false;cfg.boxes[i][j]=v;}}
     if(cfg.calibrated){if(!valid_(cfg))return false;}else if(!valid_draft_(cfg))return false;

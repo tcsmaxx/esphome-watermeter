@@ -23,12 +23,15 @@ struct Settings {
   uint16_t boxes[8][4]{};
   uint32_t baseline{0}, max_step{1000}, interval{60};
   uint8_t decimals{3}, calibrated{0};
+  int16_t rotation_tenths{0};
 };
+static_assert(sizeof(Settings)==84, "Keep existing preference layout");
 struct Configuration {
-  uint32_t version{1};
+  uint32_t version{2};
   Settings settings{};
   AlignmentReference alignment{};
 };
+static_assert(sizeof(AlignmentReference)==536 && sizeof(Configuration)==624, "Keep existing preference layout");
 struct AutofocusSettings {uint32_t version{2};uint8_t before_reading{1},manual_enabled{0};uint16_t position{512};};
 struct RuntimeSettings {
   uint32_t version{1}, warning_after{300}, last_valid_epoch{0};

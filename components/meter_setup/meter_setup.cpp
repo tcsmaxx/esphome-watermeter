@@ -38,6 +38,12 @@ static ImageBuffer decode_rgb(const uint8_t *data,size_t len) {
   if(ok) ok=jpeg_dec_process(decoder,&io)==JPEG_ERR_OK;
   jpeg_dec_close(decoder);return ok?rgb:ImageBuffer{};
 }
+static ImageBuffer rotate_image(const ImageBuffer &rgb,int16_t tenths) {
+  if(!rgb || !tenths)return rgb;
+  ImageBuffer out(static_cast<uint8_t*>(heap_caps_malloc(640*480*3,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)),heap_caps_free);
+  if(!out || !warp_rgb(rgb.get(),out.get(),image_rotation(tenths)))return {};
+  return out;
+}
 static ImageBuffer grayscale(const ImageBuffer &rgb) {
   if(!rgb) return {};
   auto *buffer=static_cast<uint8_t *>(heap_caps_malloc(640*480,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
@@ -71,14 +77,21 @@ std::shared_ptr<camera::CameraImage> MeterSetup::align_image_(const std::shared_
   const auto original_size=image->get_data_length();
   auto original=ImageBuffer(static_cast<uint8_t*>(heap_caps_malloc(original_size,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)),heap_caps_free);
   if(original){std::memcpy(original.get(),image->get_data_buffer(),original_size);inference_jpeg_=original;inference_jpeg_size_=original_size;}
-  if(!busy_ || !active_alignment_.enabled) {
+  const auto rotation=(test_?pending_:settings_).rotation_tenths;
+  if(!busy_ || (!active_alignment_.enabled && !rotation)) {
     alignment_result_="Ausgeschaltet";alignment_ms_=0;
     if(inference_jpeg_)set_preview_(inference_jpeg_,inference_jpeg_size_,false);
     return image;
   }
   const uint32_t begin=millis();
   std::string error;
-  auto rgb=decode_rgb(image->get_data_buffer(),image->get_data_length());
+  auto rgb=rotate_image(decode_rgb(image->get_data_buffer(),image->get_data_length()),rotation);
+  if(rgb && !active_alignment_.enabled) {
+    alignment_result_="Ausgeschaltet";alignment_ms_=millis()-begin;
+    if(rgb.get()[0]==0xff && rgb.get()[1]==0xd8)rgb.get()[0]=0xfe;
+    set_preview_(rgb,640*480*3,true);
+    return std::make_shared<AlignedImage>(std::move(rgb),image);
+  }
   auto gray=grayscale(rgb);
   if(!gray) error="Kamerabild konnte nicht dekodiert werden";
   else {
@@ -121,7 +134,7 @@ bool MeterSetup::save_configuration_(const Settings &settings,const AlignmentRef
   return true;
 }
 bool MeterSetup::capture_references_() {
-  auto rgb=decode_rgb(reference_capture_.get(),reference_capture_size_);
+  auto rgb=rotate_image(decode_rgb(reference_capture_.get(),reference_capture_size_),pending_alignment_.rotation_tenths);
   auto gray=grayscale(rgb);reference_capture_.reset();reference_capture_size_=0;
   auto draft=pending_alignment_;draft.ready=0;
   if(!gray || !capture_reference(gray.get(),draft)) {draft_alignment_=draft;message_="Referenzen ungeeignet: feste, kontrastreiche Bereiche wählen";return false;}
@@ -142,11 +155,11 @@ int MeterSetup::invalid_box_(const Settings &s) {
   return -1;
 }
 bool MeterSetup::valid_(const Settings &s) {
-  return s.version==1 && s.decimals<=6 && s.interval>=10 && s.interval<=86400 &&
+  return s.version==1 && s.rotation_tenths>=-1800 && s.rotation_tenths<=1800 && s.decimals<=6 && s.interval>=10 && s.interval<=86400 &&
     s.baseline<=99999999 && s.max_step>=1 && s.max_step<=99999999 && invalid_box_(s)<0;
 }
 bool MeterSetup::valid_draft_(const Settings &s) {
-  if(s.version!=1||s.decimals>6||s.interval<10||s.interval>86400||s.baseline>99999999||s.max_step<1||s.max_step>99999999)return false;
+  if(s.version!=1||s.rotation_tenths < -1800||s.rotation_tenths>1800||s.decimals>6||s.interval<10||s.interval>86400||s.baseline>99999999||s.max_step<1||s.max_step>99999999)return false;
   for(const auto &b:s.boxes){if(!b[0]&&!b[1]&&!b[2]&&!b[3])continue;if(b[0]>=b[2]||b[1]>=b[3]||b[2]>640||b[3]>480)return false;}
   return true;
 }
@@ -160,14 +173,17 @@ void MeterSetup::setup() {
   preference_=global_preferences->make_preference<Configuration>(0x7a32b903);
   Configuration loaded;
   const bool have_new=preference_.load(&loaded);
-  if(have_new && loaded.version==1 && valid_draft_(loaded.settings) && (!loaded.settings.calibrated || valid_(loaded.settings))) {
+  // Version 1 used these two fields as padding; never interpret old padding as angles.
+  if(have_new && loaded.version==1){loaded.settings.rotation_tenths=0;loaded.alignment.rotation_tenths=0;}
+  if(have_new && (loaded.version==1||loaded.version==2) && valid_draft_(loaded.settings) && (!loaded.settings.calibrated || valid_(loaded.settings))) {
     settings_=loaded.settings;alignment_=loaded.alignment;
-    if(alignment_.enabled && (!alignment_.ready || !valid_reference_regions(alignment_))) {paused_=true;reading_problem_=true;reading_error_="Ausrichtungsreferenzen ungültig; neu einrichten";message_=reading_error_;}
+    if(alignment_.enabled && (!alignment_.ready || !valid_reference_regions(alignment_) || alignment_.rotation_tenths!=settings_.rotation_tenths)) {paused_=true;reading_problem_=true;reading_error_="Ausrichtungsreferenzen ungültig; neu einrichten";message_=reading_error_;}
     else {paused_=!settings_.calibrated;message_=paused_?"Entwurf geladen; Ziffernrahmen und Zählerstand ergänzen":"Konfiguration geladen";}
     if(settings_.calibrated)reader_->set_crop_zones(zones(settings_));
   } else if(!have_new) {
     auto legacy=global_preferences->make_preference<Settings>(0x7a32b901);Settings previous;
-    if(legacy.load(&previous) && previous.calibrated && valid_(previous)) {
+    const bool have_previous=legacy.load(&previous);previous.rotation_tenths=0;
+    if(have_previous && previous.calibrated && valid_(previous)) {
       settings_=previous;paused_=false;message_="Vorhandene Konfiguration übernommen";
       reader_->set_crop_zones(zones(settings_));save_configuration_(settings_,alignment_,true);
     }
@@ -501,6 +517,7 @@ std::string MeterSetup::status_() {
   std::string out;
   out.reserve(640);
   out="{\"boxes\":"; out+=zones(settings_);
+  out+=",\"rotation_tenths\":";out+=std::to_string(settings_.rotation_tenths);
   out+=",\"warning_after\":";out+=std::to_string(runtime_.warning_after);
   out+=",\"reading_age\":";out+=std::isfinite(reading_age_)?std::to_string(uint32_t(reading_age_)):"null";
   out+=",\"stale\":";out+=stale_?"true":"false";
@@ -551,6 +568,7 @@ std::string MeterSetup::status_() {
   out+=",\"illumination_on\":";out+=illumination_on_?"true":"false";
   out+=",\"light_test\":";out+=light_test_?"true":"false";
   out+=",\"alignment_enabled\":";out+=alignment_.enabled?"true":"false";
+  out+=",\"reference_rotation_tenths\":";out+=std::to_string(draft_alignment_.rotation_tenths);
   out+=",\"reference_ready\":";out+=draft_alignment_.ready?"true":"false";
   out+=",\"reference_revision\":";out+=std::to_string(reference_revision_);
   out+=",\"references\":[";
@@ -715,6 +733,12 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     r->send(200,"text/plain","Aktion vorgemerkt");return;
   }
   if(url=="/meter/reference" || url=="/meter/test" || url=="/meter/save" || url=="/meter/save_all") {
+    int16_t rotation=settings_.rotation_tenths;
+    if(r->hasParam("rotation")) {
+      const std::string v=r->getParam("rotation")->value();char *end=nullptr;long n=std::strtol(v.c_str(),&end,10);
+      if(v.empty()||v.size()>5||*end||n < -1800||n>1800){r->send(400,"text/plain","Drehung: -180 bis 180 Grad in Zehntelgrad");return;}rotation=n;
+    }
+    pending_.rotation_tenths=rotation;
     pending_warning_after_=runtime_.warning_after;
     if(r->hasParam("warning_after")) {
       const std::string v=r->getParam("warning_after")->value();char *end=nullptr;const auto n=std::strtoul(v.c_str(),&end,10);
@@ -732,18 +756,19 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     }
     if(url=="/meter/reference") {
       if(!valid_reference_regions(pending_alignment_) || !displayed_jpeg_ || !r->hasParam("frame") || r->getParam("frame")->value()!=std::to_string(displayed_frame_)) {r->send(400,"text/plain; charset=utf-8","Neues Bild aufnehmen; zwei Referenzen 16–96 Pixel groß und mindestens 80 Pixel auseinander wählen");return;}
+      pending_alignment_.rotation_tenths=rotation;
       reference_capture_=displayed_jpeg_;reference_capture_size_=displayed_size_;command_=REFERENCE;
       r->send(200,"text/plain","Referenzen werden vorbereitet");return;
     }
-    if(!pending_alignment_.enabled&&std::memcmp(pending_alignment_.regions,draft_alignment_.regions,sizeof(pending_alignment_.regions)))pending_alignment_.ready=0;
-    if(pending_alignment_.enabled && (!draft_alignment_.ready || !valid_reference_regions(pending_alignment_) || std::memcmp(pending_alignment_.regions,draft_alignment_.regions,sizeof(pending_alignment_.regions)))) {r->send(400,"text/plain; charset=utf-8","Referenzbereiche zuerst aus dem angezeigten Bild übernehmen");return;}
+    if(!pending_alignment_.enabled&&(draft_alignment_.rotation_tenths!=rotation||std::memcmp(pending_alignment_.regions,draft_alignment_.regions,sizeof(pending_alignment_.regions))))pending_alignment_.ready=0;
+    if(pending_alignment_.enabled && (!draft_alignment_.ready || draft_alignment_.rotation_tenths!=rotation || !valid_reference_regions(pending_alignment_) || std::memcmp(pending_alignment_.regions,draft_alignment_.regions,sizeof(pending_alignment_.regions)))) {r->send(400,"text/plain; charset=utf-8","Referenzbereiche zuerst aus dem angezeigten Bild übernehmen");return;}
   }
   if(url=="/meter/reset") command_=RESET;
   else if(url=="/meter/capture") command_=CAPTURE;
   else if(url=="/meter/pause") command_=PAUSE;
   else if(url=="/meter/resume") command_=RESUME;
   else if(url=="/meter/save" || url=="/meter/test" || url=="/meter/save_all") {
-    Settings candidate=settings_; int values[32];
+    Settings candidate=settings_;candidate.rotation_tenths=pending_.rotation_tenths; int values[32];
     if(!r->hasParam("boxes") || r->getParam("boxes")->value().size()>256) {r->send(400,"text/plain","32 Koordinaten erforderlich");return;}
     std::string input=r->getParam("boxes")->value(); const char *p=input.c_str();
     for(int i=0;i<32;i++) {
@@ -787,7 +812,7 @@ void MeterSetup::set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,b
   preview_boxes_=zones(test_?pending_:settings_);
   preview_references_="[";
   for(int k=0;k<2;k++) {if(k)preview_references_+=',';preview_references_+='[';
-    for(int j=0;j<4;j++){if(j)preview_references_+=',';preview_references_+=std::to_string(active_alignment_.regions[k][j]);}preview_references_+=']';
+    for(int j=0;j<4;j++){if(j)preview_references_+=',';preview_references_+=std::to_string(active_alignment_.enabled?active_alignment_.regions[k][j]:0);}preview_references_+=']';
   }
   preview_references_+=']';
 }

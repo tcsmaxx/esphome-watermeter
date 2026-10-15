@@ -5,7 +5,7 @@ root=Path(__file__).resolve().parent.parent
 cpp=(root/'components/meter_setup/meter_setup.cpp').read_text()
 header=(root/'components/meter_setup/meter_setup.h').read_text()
 settings=header[header.index('struct Settings {'):header.index('class MeterSetup')]
-processing=cpp[cpp.index('static ImageBuffer grayscale('):cpp.index('bool MeterSetup::save_configuration_(')]
+processing=cpp[cpp.index('static ImageBuffer rotate_image('):cpp.index('bool MeterSetup::save_configuration_(')]
 source=r'''
 #include <memory>
 #include <mutex>
@@ -90,6 +90,18 @@ int main(){
  assert(owner.preview_rgb_&&owner.preview_size_==640*480*3&&owner.preview_.get()==reader.pending_frame_->get_data_buffer());
  assert(reader.pending_frame_->was_requested_by(camera::WEB_REQUESTER)&&!reader.pending_frame_->was_requested_by(camera::API_REQUESTER));
  assert(memcmp(reader.pending_frame_->get_data_buffer(),image->pixels.data(),image->pixels.size())==0); // Same corrected frame reaches the reader.
+ // Base orientation is applied before the reference search and the same RGB reaches OCR.
+ owner.active_alignment_={};owner.settings_.rotation_tenths=1800;owner.busy_=true;
+ reader.frame_state_=meter_reader_tflite::MeterReaderTFLite::FrameState::REQUESTED;reader.on_camera_image(image);
+ assert(reader.calls==3&&owner.preview_rgb_&&reader.pending_frame_!=image);
+ auto *rotated=reader.pending_frame_->get_data_buffer();
+ assert(std::abs(int(rotated[(240*640+320)*3])-int(image->pixels[(239*640+319)*3]))<=1);
+ auto base=rotate_image(decode_rgb(image->pixels.data(),image->pixels.size()),900);
+ auto base_gray=grayscale(base);owner.settings_.rotation_tenths=900;
+ owner.active_alignment_.enabled=1;memcpy(owner.active_alignment_.regions,regions,sizeof(regions));
+ assert(capture_reference(base_gray.get(),owner.active_alignment_));
+ owner.busy_=true;reader.frame_state_=meter_reader_tflite::MeterReaderTFLite::FrameState::REQUESTED;reader.on_camera_image(image);
+ assert(reader.calls==4&&owner.alignment_result_=="OK");
  std::cout<<"Alignment flow passed: zero-cost disabled path, no inference on failure, crop restore, unchanged baseline, HA error, same-image successful handoff\n";
 }
 '''

@@ -8,7 +8,7 @@ const {chromium} = require('playwright');
  const browser=await chromium.launch({...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),headless:true,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:800,height:1000}});
  let snapshotDelay=1600,captureBusyReplies=0,statusRequests=0;let captureDelay=0;let rawPreview=null;let confirmReset=false;const errors=[],posts=[],dialogs=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',async d=>{dialogs.push(d.message());if(d.type()==='confirm'&&confirmReset)await d.accept();else await d.dismiss()});
- const state={camera_standby_available:true,camera_standby_enabled:true,camera_weak_drive:false,camera_power_status:'Sensor im Software-Standby',autofocus_available:true,autofocus_before_reading:true,autofocus_status:'Bereit · noch nicht fokussiert',autofocus_error:0,boxes:Array.from({length:8},()=>[0,0,0,0]),decimals:3,interval:60,max_step:1000,baseline:0,reset_count:0,calibrated:false,busy:false,paused:true,frame:7,digits:'',confidence:0,message:'Noch nicht eingerichtet',illumination_available:true,illumination_led_count:8,illumination_led_capacity:64,illumination_enabled:false,illumination_brightness:30,illumination_settle_ms:1000,illumination_on:false,light_test:false,alignment_enabled:false,references:Array.from({length:2},()=>[0,0,0,0]),reference_ready:false,alignment_ms:0,alignment_result:'Ausgeschaltet',preview_available:false,preview_sequence:0,preview_corrected:false,warning_after:300,config_revision:0,reading_age:null,stale:false,digit_confidences:[]};
+ const state={rotation_tenths:0,camera_standby_available:true,camera_standby_enabled:true,camera_weak_drive:false,camera_power_status:'Sensor im Software-Standby',autofocus_available:true,autofocus_before_reading:true,autofocus_status:'Bereit · noch nicht fokussiert',autofocus_error:0,boxes:Array.from({length:8},()=>[0,0,0,0]),decimals:3,interval:60,max_step:1000,baseline:0,reset_count:0,calibrated:false,busy:false,paused:true,frame:7,digits:'',confidence:0,message:'Noch nicht eingerichtet',illumination_available:true,illumination_led_count:8,illumination_led_capacity:64,illumination_enabled:false,illumination_brightness:30,illumination_settle_ms:1000,illumination_on:false,light_test:false,alignment_enabled:false,references:Array.from({length:2},()=>[0,0,0,0]),reference_ready:false,alignment_ms:0,alignment_result:'Ausgeschaltet',preview_available:false,preview_sequence:0,preview_corrected:false,warning_after:300,config_revision:0,reading_age:null,stale:false,digit_confidences:[]};
  await page.route('http://meter.test/**',async route=>{
   const u=new URL(route.request().url());
   if(u.pathname==='/setup')return route.fulfill({contentType:'text/html',body:html});
@@ -32,14 +32,14 @@ const {chromium} = require('playwright');
   if(u.pathname==='/meter/live_stop'){state.live=false;state.message='Livebild beendet';}
   if(u.pathname==='/meter/preview'){if(captureDelay)await new Promise(r=>setTimeout(r,captureDelay));state.frame++;state.message='Kamerabild aufgenommen';state.autofocus_status=u.searchParams.get('focus_mode')==='manual'?'Manuell eingestellt':'Fokus gefunden';}
   if(u.pathname==='/meter/save_all'){
-   state.save_attempt=(state.save_attempt||0)+1;state.save_ok=true;state.config_revision++;state.alignment_enabled=u.searchParams.get('alignment')==='1';
+   state.rotation_tenths=Number(u.searchParams.get('rotation'));state.save_attempt=(state.save_attempt||0)+1;state.save_ok=true;state.config_revision++;state.alignment_enabled=u.searchParams.get('alignment')==='1';
    state.boxes=Array.from({length:8},(_,i)=>u.searchParams.get('boxes').split(',').slice(i*4,i*4+4).map(Number));
    if(u.searchParams.get('baseline_changed')==='1'){state.baseline=Number(u.searchParams.get('baseline'));state.calibrated=true;}
    state.autofocus_before_reading=u.searchParams.get('focus_mode')==='auto';state.manual_focus_enabled=!state.autofocus_before_reading;state.manual_focus_position=Number(u.searchParams.get('position'));
    state.camera_standby_enabled=u.searchParams.get('standby')==='1';state.camera_weak_drive=u.searchParams.get('weak_drive')==='1';
    state.illumination_led_count=Number(u.searchParams.get('led_count'));state.illumination_enabled=u.searchParams.get('enabled')==='1';state.illumination_brightness=Number(u.searchParams.get('brightness'));state.illumination_settle_ms=Number(u.searchParams.get('settle_ms'));
   }
-  if(u.pathname==='/meter/reset'){state.reset_count++;state.boxes=Array.from({length:8},()=>[0,0,0,0]);state.digits='';state.calibrated=false;state.message='Zählerkonfiguration gelöscht'}
+  if(u.pathname==='/meter/reset'){state.rotation_tenths=0;state.reset_count++;state.boxes=Array.from({length:8},()=>[0,0,0,0]);state.digits='';state.calibrated=false;state.message='Zählerkonfiguration gelöscht'}
   return route.fulfill({status:200,body:'Aktion vorgemerkt'});
  });
  await page.goto('http://meter.test/setup');await page.waitForFunction(()=>document.getElementById('message').textContent.includes('Noch nicht'));
@@ -105,8 +105,21 @@ const {chromium} = require('playwright');
  await page.waitForFunction(()=>document.getElementById('reading_health').textContent.includes('WARNUNG'));assert((await page.textContent('.crop:nth-child(3)')).includes('84.4 %'));
  state.stale=false;state.reading_age=0;await page.waitForFunction(()=>!document.getElementById('reading_health').textContent.includes('WARNUNG'));
  state.busy=true;await page.waitForFunction(()=>document.getElementById('reset').disabled);assert.equal(await page.locator('#restart').isEnabled(),true);confirmReset=true;await page.click('#restart');await page.waitForTimeout(100);assert(posts.some(p=>p.url.pathname==='/meter/restart'));confirmReset=false;state.busy=false;await page.waitForFunction(()=>!document.getElementById('reset').disabled);
+ // Rotation updates locally, preserves the raw source and requires confirmation before clearing ROIs.
+ const rotationPosts=posts.length,oldBoxes=await page.evaluate(()=>JSON.stringify(boxes));
+ await page.click('[data-rotate="900"]');assert.equal(await page.inputValue('#rotation'),'0');assert.equal(await page.evaluate(()=>JSON.stringify(boxes)),oldBoxes);
+ confirmReset=true;await page.click('[data-rotate="900"]');confirmReset=false;
+ assert.equal(await page.inputValue('#rotation'),'90');assert(await page.evaluate(()=>boxes.every(b=>b.every(v=>!v))));assert.equal(posts.length,rotationPosts);
+ await page.evaluate(async()=>{const c=document.createElement('canvas');c.width=640;c.height=480;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,640,480);x.fillStyle='#ff0000';x.fillRect(80,80,40,40);x.fillStyle='#0000ff';x.fillRect(480,380,40,40);photo=new Image();photo.src=c.toDataURL();await photo.decode();draw()});
+ assert.deepEqual(await page.evaluate(()=>Array.from(ctx.getImageData(425,75,1,1).data)),[255,0,0,255]);
+ assert.deepEqual(await page.evaluate(()=>Array.from(ctx.getImageData(200,375,1,1).data)),[0,0,255,255]);
+ assert.deepEqual(await page.evaluate(()=>Array.from(ctx.getImageData(0,0,1,1).data)),[0,0,0,255]);
+ await page.click('[data-rotate="1"]');assert.equal(await page.inputValue('#rotation'),'90.1');
+ await page.click('#save');await page.waitForFunction(()=>!activeAction&&document.getElementById('save_state').textContent.includes('Gespeichert'));assert.equal(state.rotation_tenths,901);
+ assert.equal(Number(posts.filter(p=>p.url.pathname==='/meter/save_all').at(-1).url.searchParams.get('rotation')),901);
+ await page.reload();await page.waitForFunction(()=>loaded);assert.equal(await page.inputValue('#rotation'),'90.1');
  await page.click('#reset');assert(!posts.some(p=>p.url.pathname==='/meter/reset'));confirmReset=true;
- await page.click('#reset');await page.waitForFunction(()=>boxes.every(b=>b.every(v=>v===0)));assert(posts.some(p=>p.url.pathname==='/meter/reset'));assert.equal(await page.inputValue('#baseline'),'');
+ await page.click('#reset');await page.waitForFunction(()=>boxes.every(b=>b.every(v=>v===0))&&document.getElementById('baseline').value==='');assert(posts.some(p=>p.url.pathname==='/meter/reset'));assert.equal(await page.inputValue('#baseline'),'');
  await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  if(process.env.UI_SCREENSHOTS)await page.screenshot({path:'/tmp/water-setup-mobile.png',fullPage:true});
  assert.deepEqual(errors,[]);await browser.close();console.log('UI smoke tests passed: scaled ROI drawing, split, move/clamp, test, baseline/save, pixel adjustments, keyboard, confirmed reset, mobile layout');

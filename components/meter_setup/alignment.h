@@ -11,9 +11,17 @@ struct AlignmentReference {
   uint16_t regions[2][4]{};
   uint8_t pixels[2][REF_PIXELS]{};
   uint8_t enabled{0}, ready{0};
+  int16_t rotation_tenths{0};
 };
 struct AlignmentMatch { int dx{0},dy{0}; float score{-1}, uniqueness{0}; bool valid{false}; };
 struct AlignmentTransform { float c{1},s{0},tx{0},ty{0}; bool valid{false}; };
+// Inverse mapping for clockwise rotation, fitting the entire image into 640x480.
+inline AlignmentTransform image_rotation(int16_t tenths) {
+  const float a=tenths*0.00174532925199433f,c=std::cos(a),s=std::sin(a);
+  const float scale=std::min(640.f/(std::abs(c)*640+std::abs(s)*480),480.f/(std::abs(s)*640+std::abs(c)*480));
+  AlignmentTransform t;t.c=c/scale;t.s=-s/scale;
+  t.tx=319.5f-t.c*319.5f+t.s*239.5f;t.ty=239.5f-t.s*319.5f-t.c*239.5f;t.valid=true;return t;
+}
 inline bool valid_reference_regions(const AlignmentReference &r) {
   if(r.version!=1 || r.enabled>1 || r.ready>1) return false;
   for(const auto &b:r.regions) if(b[0]>=b[2] || b[1]>=b[3] || b[2]>640 || b[3]>480 || b[2]-b[0]<16 || b[3]-b[1]<16 || b[2]-b[0]>96 || b[3]-b[1]>96) return false;

@@ -43,6 +43,12 @@ int main(){
  assert(reboot.save_configuration_(Settings{},AlignmentReference{},true));MeterSetup cleared;cleared.load_();assert(!cleared.settings_.calibrated&&cleared.paused_&&!cleared.alignment_.ready&&cleared.settings_.baseline==0); // Legacy key still exists but cannot resurrect after reset.
  refs.ready=0;migrated.save_configuration_(old,refs,true);MeterSetup corrupt;corrupt.load_();assert(corrupt.paused_&&corrupt.reading_problem_&&!corrupt.reading_error_.empty());
  Settings draft;draft.interval=120;draft.boxes[0][0]=10;draft.boxes[0][1]=20;draft.boxes[0][2]=40;draft.boxes[0][3]=60;migrated.save_configuration_(draft,AlignmentReference{},true);MeterSetup partial;partial.load_();assert(partial.paused_&&!partial.settings_.calibrated&&partial.settings_.interval==120&&partial.settings_.boxes[0][0]==10);
+ static_assert(sizeof(Settings)==84);static_assert(sizeof(AlignmentReference)==536);static_assert(sizeof(Configuration)==624);
+ Configuration v1;v1.version=1;v1.settings=old;v1.settings.rotation_tenths=12345;v1.alignment=refs;v1.alignment.ready=1;v1.alignment.rotation_tenths=-23456;
+ globals.make_preference<Configuration>(0x7a32b903).save(&v1);MeterSetup padding;padding.load_();assert(padding.settings_.baseline==old.baseline&&!padding.paused_&&padding.settings_.rotation_tenths==0&&padding.alignment_.rotation_tenths==0);
+ old.rotation_tenths=-123;refs.rotation_tenths=-123;refs.ready=1;
+ migrated.save_configuration_(old,refs,true);MeterSetup angle;angle.load_();assert(!angle.paused_&&angle.settings_.rotation_tenths==-123&&angle.alignment_.rotation_tenths==-123);
+ refs.rotation_tenths=0;migrated.save_configuration_(old,refs,true);MeterSetup mismatch;mismatch.load_();assert(mismatch.paused_&&mismatch.reading_problem_);
  std::cout<<"Persistence passed: legacy migration, reference reload, persistent reset without resurrection, invalid-reference pause\n";
 }
 '''
