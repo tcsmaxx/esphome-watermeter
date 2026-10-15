@@ -53,7 +53,7 @@ class MeterSetup {
 '''+fields+r'''
  Camera camera;Camera *camera_=&camera;AlignedMeterReader reader;Reader *reader_=&reader;
  struct Power{bool available=false,awake=true;int requests=0;void request(){++requests;}bool supported(){return available;}bool ready(){return awake;}uint32_t generation(){return 0;}}camera_power_;
- bool manual_focus_once_=false;
+ bool manual_focus_once_=false,preview_active_=false,focus_only_=false;AutofocusSettings preview_focus_{};
  uint32_t autofocus_power_generation_=UINT32_MAX;
  AutofocusSettings autofocus_settings_{1,0};bool autofocus_once_=false,autofocus_used_=false;struct AF{bool supported(){return false;}}autofocus_;bool start_autofocus_(){return false;}void autofocus_loop_(){}
  bool live_=false,live_streaming_=false;uint32_t live_last_frame_=0,live_frame_at_=0;

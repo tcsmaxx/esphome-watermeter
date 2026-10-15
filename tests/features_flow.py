@@ -4,6 +4,8 @@ import subprocess,tempfile
 root=Path(__file__).resolve().parent.parent
 header=(root/'components/meter_setup/meter_setup.h').read_text();cpp=(root/'components/meter_setup/meter_setup.cpp').read_text();features=(root/'components/meter_setup/features.cpp').read_text()
 structs=header[header.index('struct Settings {'):header.index('class MeterSetup;')]
+settings_flow=(root/"components/meter_setup/settings_flow.cpp").read_text()
+all_save=settings_flow[settings_flow.index("bool MeterSetup::save_all_()"):settings_flow.rfind("\n}")]
 methods=features[features.index('void MeterSetup::capture_digit_log_('):features.rfind('\n}')]
 a=methods.index('void AlignedMeterReader::loop()');b=methods.index('void MeterSetup::features_loop_()',a);methods=methods[:a]+methods[b:]
 save_body=cpp[cpp.index('    if(cmd==SAVE) {')+len('    if(cmd==SAVE) {'):cpp.index('    } else {\n      reader_->set_crop_zones')]
@@ -63,6 +65,7 @@ public:
  bool confidence_pending_=false;uint32_t confidence_finished_at_=0,mqtt_state_at_=0;uint8_t mqtt_discovery_index_=0;
  Sensor age;Sensor *age_sensor_=&age;Binary stale;Binary *stale_sensor_=&stale;Reader reader;Reader *reader_=&reader;
  struct Power{bool standby=true,weak=false;bool standby_enabled(){return standby;}bool weak_drive(){return weak;}bool configure(bool s,bool w){standby=s;weak=w;return true;}}camera_power_;
+ uint32_t save_attempt_=0;bool save_ok_=false,pending_autofocus_=true,pending_manual_focus_=false,pending_standby_=true,pending_weak_drive_=false;uint16_t pending_focus_position_=512;bool save_all_();
  AutofocusSettings autofocus_settings_{};Pref autofocus_preference_;
  Pref illumination_preference_,runtime_preference_;Configuration saved{};
  uint16_t led_capacity_()const{return 64;}bool save_configuration_(const Settings &s,const AlignmentReference&a,bool){saved.settings=s;saved.alignment=a;return true;}
@@ -70,11 +73,11 @@ public:
  void apply_save_(){
 '''+save_body+r'''
  }
- static int invalid_box_(const Settings&);static bool valid_(const Settings&);
+ static int invalid_box_(const Settings&);static bool valid_(const Settings&);static bool valid_draft_(const Settings&);
  void capture_digit_scores_(const std::string&,const float*);
  void capture_digit_log_(const char*,const char*,size_t);void features_loop_();void build_export_();void import_config_();void mqtt_loop_();
 };
-'''+validation+methods+r'''
+'''+validation+methods+all_save+r'''
 int main(){
  MeterSetup original;original.settings_.calibrated=1;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.illumination_settings_.led_count=6;
  for(int i=0;i<8;i++){auto &b=original.settings_.boxes[i];b[0]=20+i*50;b[1]=100;b[2]=b[0]+30;b[3]=150;}
@@ -105,6 +108,8 @@ int main(){
  MeterSetup failed_focus_save;failed_focus_save.pending_import_=original.export_json_;failed_focus_save.autofocus_preference_.fail_next=true;failed_focus_save.import_config_();assert(failed_focus_save.config_revision_==0&&failed_focus_save.autofocus_settings_.before_reading==1&&failed_focus_save.saved.settings.baseline==0);
  original.autofocus_settings_.manual_enabled=1;original.autofocus_settings_.position=623;original.build_export_();MeterSetup manual_backup;manual_backup.pending_import_=original.export_json_;manual_backup.import_config_();assert(manual_backup.config_revision_==1&&manual_backup.autofocus_settings_.manual_enabled&&manual_backup.autofocus_settings_.position==623);
  JsonDocument invalid_manual;deserializeJson(invalid_manual,original.export_json_);invalid_manual["manual_focus_position"]=1024;MeterSetup rejected_manual;serializeJson(invalid_manual,rejected_manual.pending_import_);rejected_manual.import_config_();assert(rejected_manual.config_revision_==0);
+ MeterSetup combined;combined.settings_=original.settings_;combined.pending_=combined.settings_;combined.pending_.interval=180;combined.pending_alignment_=original.alignment_;combined.pending_illumination_=original.illumination_settings_;combined.pending_illumination_.brightness=37;combined.pending_warning_after_=720;combined.pending_autofocus_=false;combined.pending_manual_focus_=true;combined.pending_focus_position_=339;combined.pending_standby_=false;combined.have_previous_reading_=true;combined.runtime_.last_valid_epoch=1700000000;assert(combined.save_all_()&&combined.save_ok_&&combined.save_attempt_==1&&combined.settings_.interval==180&&combined.autofocus_settings_.position==339&&combined.illumination_settings_.brightness==37&&combined.runtime_.warning_after==720&&!combined.camera_power_.standby_enabled());assert(combined.have_previous_reading_&&combined.runtime_.last_valid_epoch==1700000000);
+ combined.pending_.interval=240;combined.pending_focus_position_=400;combined.autofocus_preference_.fail_next=true;assert(!combined.save_all_()&&!combined.save_ok_&&combined.save_attempt_==2&&combined.settings_.interval==180&&combined.autofocus_settings_.position==339&&combined.saved.settings.interval==180);
  std::cout<<"Features passed: backup/reference roundtrip, strict validation/rollback, per-digit matching, age warning/recovery, camera discovery/MAC, binary JPEG/retain/retry/test isolation\n";
 }
 '''

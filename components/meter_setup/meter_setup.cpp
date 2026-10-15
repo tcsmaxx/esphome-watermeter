@@ -145,6 +145,11 @@ bool MeterSetup::valid_(const Settings &s) {
   return s.version==1 && s.decimals<=6 && s.interval>=10 && s.interval<=86400 &&
     s.baseline<=99999999 && s.max_step>=1 && s.max_step<=99999999 && invalid_box_(s)<0;
 }
+bool MeterSetup::valid_draft_(const Settings &s) {
+  if(s.version!=1||s.decimals>6||s.interval<10||s.interval>86400||s.baseline>99999999||s.max_step<1||s.max_step>99999999)return false;
+  for(const auto &b:s.boxes){if(!b[0]&&!b[1]&&!b[2]&&!b[3])continue;if(b[0]>=b[2]||b[1]>=b[3]||b[2]>640||b[3]>480)return false;}
+  return true;
+}
 static std::string zones(const Settings &s) {
   std::string out="["; char b[64];
   for(int i=0;i<8;i++){snprintf(b,sizeof(b),"%s[%u,%u,%u,%u]",i?",":"",s.boxes[i][0],s.boxes[i][1],s.boxes[i][2],s.boxes[i][3]);out+=b;}
@@ -155,11 +160,11 @@ void MeterSetup::setup() {
   preference_=global_preferences->make_preference<Configuration>(0x7a32b903);
   Configuration loaded;
   const bool have_new=preference_.load(&loaded);
-  if(have_new && loaded.version==1 && loaded.settings.calibrated && valid_(loaded.settings)) {
+  if(have_new && loaded.version==1 && valid_draft_(loaded.settings) && (!loaded.settings.calibrated || valid_(loaded.settings))) {
     settings_=loaded.settings;alignment_=loaded.alignment;
     if(alignment_.enabled && (!alignment_.ready || !valid_reference_regions(alignment_))) {paused_=true;reading_problem_=true;reading_error_="Ausrichtungsreferenzen ungültig; neu einrichten";message_=reading_error_;}
-    else {paused_=false;message_="Konfiguration geladen";}
-    reader_->set_crop_zones(zones(settings_));
+    else {paused_=!settings_.calibrated;message_=paused_?"Entwurf geladen; Ziffernrahmen und Zählerstand ergänzen":"Konfiguration geladen";}
+    if(settings_.calibrated)reader_->set_crop_zones(zones(settings_));
   } else if(!have_new) {
     auto legacy=global_preferences->make_preference<Settings>(0x7a32b901);Settings previous;
     if(legacy.load(&previous) && previous.calibrated && valid_(previous)) {
@@ -222,7 +227,7 @@ void MeterSetup::on_camera_image(const std::shared_ptr<camera::CameraImage> &ima
   std::lock_guard<std::mutex> guard(mutex_);
   jpeg_=std::move(copy); jpeg_size_=len; ++frame_;
   if(capture_pending_ && capture_stage_==2 && !capture_inference_) {
-    capture_pending_=false;
+    capture_pending_=false;preview_active_=false;
     if(live_){live_streaming_=true;live_last_frame_=frame_;live_frame_at_=millis();camera_->start_stream(camera::WEB_REQUESTER);message_="Debug-Livebild aktiv · Fokus bleibt unverändert";}
     else {set_illumination_(light_test_,pending_illumination_);message_="Kamerabild aufgenommen";}
   }
@@ -287,8 +292,9 @@ void MeterSetup::begin_capture_(bool inference) {
   autofocus_used_=false;
   capture_inference_=inference;capture_started_=millis();inference_started_=false;
   capture_pending_=true;flush_received_=false;
-  const bool automatic_light=illumination_ && (illumination_settings_.enabled || light_test_);
-  const auto &lighting=light_test_?pending_illumination_:illumination_settings_;
+  if(focus_only_){capture_stage_=0;capture_deadline_=millis();return;}
+  const auto &lighting=(preview_active_||light_test_)?pending_illumination_:illumination_settings_;
+  const bool automatic_light=illumination_ && (lighting.enabled || light_test_);
   if(automatic_light) {
     set_illumination_(true,lighting);
     capture_stage_=0;capture_deadline_=millis()+lighting.settle_ms;
@@ -311,7 +317,7 @@ void MeterSetup::illumination_loop_() {
   }
   if(!capture_pending_) return;
   if(millis()-capture_started_>(autofocus_used_?25000U:15000U)) {
-    capture_pending_=false;busy_=false;inference_started_=false;reader_->set_pause_processing(true);
+    capture_pending_=false;busy_=false;inference_started_=false;focus_only_=false;preview_active_=false;reader_->set_pause_processing(true);
     set_illumination_(light_test_,pending_illumination_);message_="Kamerabild ausgeblieben";
     if(capture_inference_ && !test_) {reading_problem_=true;reading_error_=message_;}
     next_=millis()+settings_.interval*1000;return;
@@ -339,7 +345,8 @@ void MeterSetup::start_(bool test) {
 void MeterSetup::loop() {
   std::lock_guard<std::mutex> guard(mutex_);
   Command cmd=command_; command_=NONE;
-  live_loop_(cmd==LIVE_START,cmd==LIVE_STOP || (cmd!=NONE && cmd!=LIVE_START && cmd!=MANUAL_FOCUS));
+  if(cmd==LIVE_START){preview_active_=live_preview_;preview_focus_.before_reading=pending_autofocus_;preview_focus_.manual_enabled=pending_manual_focus_;preview_focus_.position=pending_focus_position_;}
+  live_loop_(cmd==LIVE_START,cmd==LIVE_STOP || (cmd!=NONE && cmd!=LIVE_START && cmd!=MANUAL_FOCUS && cmd!=FOCUS_ONLY));
   if(cmd==RESTART && !reboot_pending_) {
     record_fault_("Manueller Neustart über Setup",false);
     reboot_pending_=true;reboot_at_=millis()+1500;paused_=true;
@@ -356,6 +363,9 @@ void MeterSetup::loop() {
     if(autofocus_preference_.save(&autofocus_settings_)&&global_preferences->sync()){message_="Fokuseinstellung gespeichert";build_export_();}
     else {autofocus_settings_=old;autofocus_preference_.save(&old);global_preferences->sync();message_="Fokuseinstellung konnte nicht gespeichert werden";}
   }
+  if(cmd==SAVE_ALL)save_all_();
+  if(cmd==PREVIEW){paused_=true;preview_active_=true;preview_focus_.before_reading=pending_autofocus_;preview_focus_.manual_enabled=pending_manual_focus_;preview_focus_.position=pending_focus_position_;begin_capture_(false);}
+  if(cmd==FOCUS_ONLY){focus_only_=true;manual_focus_once_=true;manual_focus_position_=pending_focus_position_;if(!live_)paused_=true;begin_capture_(false);}
   if(cmd==MANUAL_FOCUS){
     if(live_){camera_->stop_stream(camera::WEB_REQUESTER);live_streaming_=false;}else paused_=true;
     manual_focus_once_=true;manual_focus_position_=pending_focus_position_;begin_capture_(false);
@@ -522,6 +532,8 @@ std::string MeterSetup::status_() {
   out+=",\"camera_sleeping\":";out+=camera_power_.sleeping()?"true":"false";
   out+=",\"camera_weak_drive\":";out+=camera_power_.weak_drive()?"true":"false";
   out+=",\"camera_power_status\":";out+=quote(camera_power_.status());
+  out+=",\"save_attempt\":";out+=std::to_string(save_attempt_);
+  out+=",\"save_ok\":";out+=save_ok_?"true":"false";
   out+=",\"manual_focus_enabled\":";out+=autofocus_settings_.manual_enabled?"true":"false";
   out+=",\"manual_focus_position\":";out+=std::to_string(autofocus_settings_.position);
   out+=",\"manual_focus_applied\":";out+=autofocus_.position()<0?"null":std::to_string(autofocus_.position());
@@ -639,21 +651,26 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     if(live_||command_==LIVE_START)command_=LIVE_STOP;
     r->send(200,"text/plain","Livebild wird beendet");return;
   }
-  if(live_ && url!="/meter/manual_focus"){r->send(409,"text/plain; charset=utf-8","Zuerst Livebild stoppen");return;}
+  if(live_ && url!="/meter/manual_focus" && url!="/meter/focus_only"){r->send(409,"text/plain; charset=utf-8","Zuerst Livebild stoppen");return;}
   if(command_!=NONE || ((busy_ || capture_pending_) && url!="/meter/pause")) {r->send(409,"text/plain","Bitte laufende Aktion abwarten");return;}
-  if(url=="/meter/live_start"){command_=LIVE_START;r->send(200,"text/plain","Livebild wird gestartet");return;}
+  if(url=="/meter/live_start"){live_preview_=r->hasParam("focus_mode");if(live_preview_&&!parse_options_(r,false))return;command_=LIVE_START;r->send(200,"text/plain","Livebild wird gestartet");return;}
+  if(url=="/meter/preview"){
+    if(!parse_options_(r,false))return;
+    command_=PREVIEW;r->send(200,"text/plain","Neues Bild mit den gewählten Einstellungen angefordert");return;
+  }
+  if(url=="/meter/save_all" && !parse_options_(r,true))return;
   if(url=="/meter/power_save"){
     if(!r->hasParam("standby")||!r->hasParam("weak_drive")){r->send(400,"text/plain","standby und weak_drive erforderlich");return;}
     const auto standby=r->getParam("standby")->value(),weak=r->getParam("weak_drive")->value();
     if((standby!="0"&&standby!="1")||(weak!="0"&&weak!="1")){r->send(400,"text/plain","Nur 0 oder 1 erlaubt");return;}
     pending_standby_=standby=="1";pending_weak_drive_=weak=="1";command_=POWER_SAVE;r->send(200,"text/plain","Stromsparen vorgemerkt");return;
   }
-  if(url=="/meter/manual_focus"){
+  if(url=="/meter/manual_focus" || url=="/meter/focus_only"){
     if(!autofocus_.supported()){r->send(400,"text/plain","OV5640 erforderlich");return;}
     if(!r->hasParam("position")){r->send(400,"text/plain","Fokusposition fehlt");return;}
     const std::string v=r->getParam("position")->value();
     if(v.empty()||v.size()>4||v.find_first_not_of("0123456789")!=std::string::npos||std::strtoul(v.c_str(),nullptr,10)>1023){r->send(400,"text/plain","Fokusposition: 0 bis 1023");return;}
-    pending_focus_position_=std::strtoul(v.c_str(),nullptr,10);command_=MANUAL_FOCUS;
+    pending_focus_position_=std::strtoul(v.c_str(),nullptr,10);command_=url=="/meter/focus_only"?FOCUS_ONLY:MANUAL_FOCUS;
     r->send(200,"text/plain","Manueller Fokus wird gesetzt");return;
   }
   if(url=="/meter/focus" || url=="/meter/focus_save") {
@@ -697,7 +714,7 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     command_=url=="/meter/light_on"?LIGHT_ON:url=="/meter/light_off"?LIGHT_OFF:LIGHT_SAVE;
     r->send(200,"text/plain","Aktion vorgemerkt");return;
   }
-  if(url=="/meter/reference" || url=="/meter/test" || url=="/meter/save") {
+  if(url=="/meter/reference" || url=="/meter/test" || url=="/meter/save" || url=="/meter/save_all") {
     pending_warning_after_=runtime_.warning_after;
     if(r->hasParam("warning_after")) {
       const std::string v=r->getParam("warning_after")->value();char *end=nullptr;const auto n=std::strtoul(v.c_str(),&end,10);
@@ -718,13 +735,14 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
       reference_capture_=displayed_jpeg_;reference_capture_size_=displayed_size_;command_=REFERENCE;
       r->send(200,"text/plain","Referenzen werden vorbereitet");return;
     }
+    if(!pending_alignment_.enabled&&std::memcmp(pending_alignment_.regions,draft_alignment_.regions,sizeof(pending_alignment_.regions)))pending_alignment_.ready=0;
     if(pending_alignment_.enabled && (!draft_alignment_.ready || !valid_reference_regions(pending_alignment_) || std::memcmp(pending_alignment_.regions,draft_alignment_.regions,sizeof(pending_alignment_.regions)))) {r->send(400,"text/plain; charset=utf-8","Referenzbereiche zuerst aus dem angezeigten Bild übernehmen");return;}
   }
   if(url=="/meter/reset") command_=RESET;
   else if(url=="/meter/capture") command_=CAPTURE;
   else if(url=="/meter/pause") command_=PAUSE;
   else if(url=="/meter/resume") command_=RESUME;
-  else if(url=="/meter/save" || url=="/meter/test") {
+  else if(url=="/meter/save" || url=="/meter/test" || url=="/meter/save_all") {
     Settings candidate=settings_; int values[32];
     if(!r->hasParam("boxes") || r->getParam("boxes")->value().size()>256) {r->send(400,"text/plain","32 Koordinaten erforderlich");return;}
     std::string input=r->getParam("boxes")->value(); const char *p=input.c_str();
@@ -742,6 +760,13 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     uint32_t decimals;
     if(!number("decimals",decimals) || decimals>6 || !number("interval",candidate.interval) || !number("baseline",candidate.baseline) || !number("max_step",candidate.max_step)) {r->send(400,"text/plain","Ungültige Einstellungen");return;}
     candidate.decimals=decimals;
+    if(url=="/meter/save_all"){
+      const bool baseline_changed=r->hasParam("baseline_changed")&&r->getParam("baseline_changed")->value()=="1";
+      if(!baseline_changed)candidate.baseline=settings_.baseline;
+      candidate.calibrated=valid_(candidate)&&(settings_.calibrated||baseline_changed);
+      if(!valid_draft_(candidate)){r->send(400,"text/plain","Ungültiger Rahmen oder Ableseeinstellung");return;}
+      pending_=candidate;command_=SAVE_ALL;r->send(200,"text/plain","Alle Einstellungen werden gespeichert");return;
+    }
     if(!valid_(candidate)) {
       const int box=invalid_box_(candidate);
       if(box>=0) {

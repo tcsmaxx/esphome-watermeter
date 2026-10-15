@@ -45,6 +45,7 @@ void AutofocusController::task_(void *context) {
   } else {
   self->position_=-1;
   if(!self->initialized_){
+    ESP_LOGI("meter_autofocus","Autofokus-Firmware wird initialisiert");
     esp_camera_af_config_t config{};config.mode=ESP_CAMERA_AF_MODE_MANUAL;config.timeout_ms=2000;
     result=esp_camera_af_init(sensor,&config);self->initialized_=result==ESP_OK;
   }

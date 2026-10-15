@@ -27,7 +27,7 @@ struct Reader {std::string crops;void set_crop_zones(const std::string&s){crops=
 std::string zones(const Settings&){return "loaded boxes";}
 class MeterSetup {
  public:Preference preference_;Settings settings_{};AlignmentReference alignment_{},draft_alignment_{};bool paused_=true,reading_problem_=false;std::string message_,reading_error_;Reader reader;Reader *reader_=&reader;
- static int invalid_box_(const Settings&);static bool valid_(const Settings&);
+ static int invalid_box_(const Settings&);static bool valid_(const Settings&);static bool valid_draft_(const Settings&);
  bool save_configuration_(const Settings&,const AlignmentReference&,bool);
  void load_(){
 '''+load+r'''
@@ -42,6 +42,7 @@ int main(){
  assert(migrated.save_configuration_(old,refs,true));MeterSetup reboot;reboot.load_();assert(!reboot.paused_&&reboot.settings_.baseline==old.baseline&&reboot.alignment_.pixels[1][42]==213&&reboot.draft_alignment_.ready);
  assert(reboot.save_configuration_(Settings{},AlignmentReference{},true));MeterSetup cleared;cleared.load_();assert(!cleared.settings_.calibrated&&cleared.paused_&&!cleared.alignment_.ready&&cleared.settings_.baseline==0); // Legacy key still exists but cannot resurrect after reset.
  refs.ready=0;migrated.save_configuration_(old,refs,true);MeterSetup corrupt;corrupt.load_();assert(corrupt.paused_&&corrupt.reading_problem_&&!corrupt.reading_error_.empty());
+ Settings draft;draft.interval=120;draft.boxes[0][0]=10;draft.boxes[0][1]=20;draft.boxes[0][2]=40;draft.boxes[0][3]=60;migrated.save_configuration_(draft,AlignmentReference{},true);MeterSetup partial;partial.load_();assert(partial.paused_&&!partial.settings_.calibrated&&partial.settings_.interval==120&&partial.settings_.boxes[0][0]==10);
  std::cout<<"Persistence passed: legacy migration, reference reload, persistent reset without resurrection, invalid-reference pause\n";
 }
 '''

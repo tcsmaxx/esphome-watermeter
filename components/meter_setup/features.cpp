@@ -104,7 +104,7 @@ void MeterSetup::import_config_() {
     if(!s["calibrated"].is<bool>()||!uint_value(s["baseline"],0,99999999,cfg.baseline)||!uint_value(s["max_step"],1,99999999,cfg.max_step)||!uint_value(s["interval"],10,86400,cfg.interval)||!uint_value(s["decimals"],0,6,v))return false;
     cfg.decimals=v;cfg.calibrated=s["calibrated"].as<bool>();auto boxes=s["boxes"].as<JsonArray>();if(boxes.size()!=8)return false;
     for(int i=0;i<8;i++){auto row=boxes[i].as<JsonArray>();if(row.size()!=4)return false;for(int j=0;j<4;j++){if(!uint_value(row[j],0,j%2?480:640,v))return false;cfg.boxes[i][j]=v;}}
-    if(cfg.calibrated){if(!valid_(cfg))return false;}else for(const auto &box:cfg.boxes)for(auto value:box)if(value)return false;
+    if(cfg.calibrated){if(!valid_(cfg))return false;}else if(!valid_draft_(cfg))return false;
     auto a=root["alignment"].as<JsonObject>();if(!a["enabled"].is<bool>()||!a["ready"].is<bool>()||!a["pixels"].is<const char*>())return false;
     refs.enabled=a["enabled"].as<bool>();refs.ready=a["ready"].as<bool>();auto regions=a["regions"].as<JsonArray>();if(regions.size()!=2)return false;
     for(int i=0;i<2;i++){auto row=regions[i].as<JsonArray>();if(row.size()!=4)return false;for(int j=0;j<4;j++){if(!uint_value(row[j],0,j%2?480:640,v))return false;refs.regions[i][j]=v;}}

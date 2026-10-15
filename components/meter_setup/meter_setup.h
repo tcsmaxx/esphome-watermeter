@@ -96,6 +96,12 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   bool save_configuration_(const Settings &settings,const AlignmentReference &alignment,bool flush);
   bool capture_references_();
   void begin_capture_(bool inference);
+  bool parse_options_(AsyncWebServerRequest *request,bool power);
+  bool save_all_();
+  static bool valid_draft_(const Settings &settings);
+  bool preview_active_{false},focus_only_{false},live_preview_{false};
+  AutofocusSettings preview_focus_{};
+  uint32_t save_attempt_{0};bool save_ok_{false};
   void autofocus_setup_();
   bool start_autofocus_();
   void autofocus_loop_();
@@ -197,7 +203,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   uint32_t frame_{0}, next_{0}, started_{0}, reset_count_{0};
   float confidence_{0};
   bool busy_{false}, test_{false}, timed_out_{false}, accepted_{false};
-  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE, POWER_SAVE, LIVE_START, LIVE_STOP, MANUAL_FOCUS } command_{NONE};
+  enum Command { NONE, CAPTURE, SAVE, TEST, PAUSE, RESUME, RESET, REFERENCE, LIGHT_ON, LIGHT_OFF, LIGHT_SAVE, RESTART, IMPORT, FOCUS, FOCUS_SAVE, POWER_SAVE, LIVE_START, LIVE_STOP, MANUAL_FOCUS, FOCUS_ONLY, PREVIEW, SAVE_ALL } command_{NONE};
   bool paused_{true};
 };
 class AlignedMeterReader : public meter_reader_tflite::MeterReaderTFLite {

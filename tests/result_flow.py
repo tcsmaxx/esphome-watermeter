@@ -71,7 +71,7 @@ class MeterSetup {
   std::string digits_,message_;
   float confidence_=0;
   static int invalid_box_(const Settings &s);
-  static bool valid_(const Settings &s);
+  static bool valid_(const Settings &s);static bool valid_draft_(const Settings &s);
   void diagnostics_();
   void reset_();
   bool save_configuration_(const Settings &,const AlignmentReference &,bool);
