@@ -8,8 +8,8 @@ bool MeterSetup::parse_image_options_(AsyncWebServerRequest *r){
   const bool any=r->hasParam("image_exposure")||r->hasParam("image_contrast")||r->hasParam("image_saturation")||r->hasParam("image_white_balance");
   if(any){
     if(!r->hasParam("image_exposure")||!r->hasParam("image_contrast")||!r->hasParam("image_saturation")||!r->hasParam("image_white_balance")||
-       !parse_image_adjustment(r->getParam("image_exposure")->value(),candidate.exposure)||!parse_image_adjustment(r->getParam("image_contrast")->value(),candidate.contrast)||!parse_image_adjustment(r->getParam("image_saturation")->value(),candidate.saturation)){
-      r->send(400,"text/plain; charset=utf-8","Bildeinstellungen: Belichtung, Kontrast und Sättigung jeweils −2 bis +2");return false;
+       !parse_image_adjustment(r->getParam("image_exposure")->value(),candidate.exposure,image_limits_.exposure)||!parse_image_adjustment(r->getParam("image_contrast")->value(),candidate.contrast,image_limits_.contrast)||!parse_image_adjustment(r->getParam("image_saturation")->value(),candidate.saturation,image_limits_.saturation)){
+      r->send(400,"text/plain; charset=utf-8","Bildeinstellungen außerhalb der Grenzen dieser Kamera");return false;
     }
     const auto wb=r->getParam("image_white_balance")->value();if(wb.size()!=1||wb[0]<'0'||wb[0]>'4'){r->send(400,"text/plain; charset=utf-8","Weißabgleich ungültig");return false;}candidate.white_balance=wb[0]-'0';
   }

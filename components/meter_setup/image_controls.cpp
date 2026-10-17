@@ -1,5 +1,6 @@
 #include "meter_setup.h"
 #include "esp_camera.h"
+#include <algorithm>
 #include "esphome/core/log.h"
 namespace esphome::meter_setup {
 bool MeterSetup::image_controls_available_() const {
@@ -7,7 +8,11 @@ bool MeterSetup::image_controls_available_() const {
 }
 void MeterSetup::image_setup_(){
   image_preference_=global_preferences->make_preference<ImageSettings>(0x7a32b90d);
+  auto *sensor=esp_camera_sensor_get();if(sensor&&(sensor->id.PID==OV5640_PID||sensor->id.PID==OV3660_PID))image_limits_={5,3,4};
   ImageSettings saved;if(image_preference_.load(&saved)&&valid_image_settings(saved))image_settings_=saved;
+  image_settings_.exposure=std::max<int>(-image_limits_.exposure,std::min<int>(image_limits_.exposure,image_settings_.exposure));
+  image_settings_.contrast=std::max<int>(-image_limits_.contrast,std::min<int>(image_limits_.contrast,image_settings_.contrast));
+  image_settings_.saturation=std::max<int>(-image_limits_.saturation,std::min<int>(image_limits_.saturation,image_settings_.saturation));
   pending_image_=image_settings_;image_status_=image_controls_available_()?"Bildeinstellungen bereit":"Bildeinstellungen für diese Kamera nicht verfügbar";
 }
 bool MeterSetup::prepare_image_settings_(){

@@ -68,7 +68,7 @@ public:
  struct Power{bool standby=true,weak=false;bool standby_enabled(){return standby;}bool weak_drive(){return weak;}bool configure(bool s,bool w){standby=s;weak=w;return true;}}camera_power_;
  uint32_t save_attempt_=0;bool save_ok_=false,pending_autofocus_=true,pending_manual_focus_=false,pending_standby_=true,pending_weak_drive_=false;uint16_t pending_focus_position_=512;bool save_all_();
  AutofocusSettings autofocus_settings_{};Pref autofocus_preference_;
- ImageSettings image_settings_{},pending_image_{};Pref image_preference_;
+ ImageLimits image_limits_{5,3,4};ImageSettings image_settings_{},pending_image_{};Pref image_preference_;
  Pref illumination_preference_,runtime_preference_;Configuration saved{};
  uint16_t led_capacity_()const{return 64;}bool save_configuration_(const Settings &s,const AlignmentReference&a,bool){saved.settings=s;saved.alignment=a;return true;}
  void set_illumination_(bool,const IlluminationSettings&){}
@@ -81,7 +81,7 @@ public:
 };
 '''+validation+methods+all_save+r'''
 int main(){
- MeterSetup original;original.settings_.calibrated=1;original.settings_.rotation_tenths=-123;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.image_settings_.exposure=-1;original.image_settings_.contrast=1;original.image_settings_.saturation=-1;original.image_settings_.white_balance=3;original.illumination_settings_.led_count=6;original.illumination_settings_.led_mask=0x8000000000000025ULL;
+ MeterSetup original;original.settings_.calibrated=1;original.settings_.rotation_tenths=-123;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.image_settings_.exposure=-5;original.image_settings_.contrast=3;original.image_settings_.saturation=-4;original.image_settings_.white_balance=3;original.illumination_settings_.led_count=6;original.illumination_settings_.led_mask=0x8000000000000025ULL;
  for(int i=0;i<8;i++){auto &b=original.settings_.boxes[i];b[0]=20+i*50;b[1]=100;b[2]=b[0]+30;b[3]=150;}
  original.alignment_.enabled=original.alignment_.ready=1;uint16_t regions[2][4]={{100,200,132,232},{450,200,482,232}};memcpy(original.alignment_.regions,regions,sizeof(regions));for(auto &row:original.alignment_.pixels)for(int i=0;i<256;i++)row[i]=i%2?20:200;
  original.build_export_();assert(original.export_json_.size()<3000);assert(original.export_json_.find("password")==std::string::npos);

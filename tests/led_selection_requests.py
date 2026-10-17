@@ -17,7 +17,7 @@ source=r'''
 '''+f'#include "{root / "components/meter_setup/image_settings.h"}"\n#include "{root / "components/meter_setup/led_selection.h"}"\nusing namespace esphome::meter_setup;\n'+structs+r'''
 struct Param{std::string data;const std::string &value(){return data;}};
 struct AsyncWebServerRequest {std::map<std::string,Param> values;int status=0;bool hasParam(const char*k){return values.count(k);}Param *getParam(const char*k){return &values.at(k);}void send(int code,const char*,const char*){status=code;}};
-struct MeterSetup{ImageSettings image_settings_{},pending_image_{};bool parse_image_options_(AsyncWebServerRequest*);void *illumination_=this;IlluminationSettings illumination_settings_{},pending_illumination_{};bool pending_manual_focus_=false,pending_autofocus_=true,pending_standby_=false,pending_weak_drive_=false;uint16_t pending_focus_position_=0;enum {NONE,LIGHT_ON,LIGHT_OFF,LIGHT_SAVE};int command_=NONE;uint16_t led_capacity_(){return 64;}bool parse_options_(AsyncWebServerRequest*,bool);void request(AsyncWebServerRequest*r,const std::string&url){
+struct MeterSetup{ImageLimits image_limits_{5,3,4};ImageSettings image_settings_{},pending_image_{};bool parse_image_options_(AsyncWebServerRequest*);void *illumination_=this;IlluminationSettings illumination_settings_{},pending_illumination_{};bool pending_manual_focus_=false,pending_autofocus_=true,pending_standby_=false,pending_weak_drive_=false;uint16_t pending_focus_position_=0;enum {NONE,LIGHT_ON,LIGHT_OFF,LIGHT_SAVE};int command_=NONE;uint16_t led_capacity_(){return 64;}bool parse_options_(AsyncWebServerRequest*,bool);void request(AsyncWebServerRequest*r,const std::string&url){
 '''+light+r'''
 }};
 '''+options+r'''

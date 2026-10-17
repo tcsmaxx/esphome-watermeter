@@ -29,17 +29,22 @@ inline bool valid_reference_regions(const AlignmentReference &r) {
   const float dy=(int(r.regions[1][1])+r.regions[1][3]-r.regions[0][1]-r.regions[0][3])*0.5f;
   return dx*dx+dy*dy>=80*80;
 }
-inline bool capture_reference(const uint8_t *gray, AlignmentReference &r) {
+inline bool capture_reference(const uint8_t *gray, AlignmentReference &r,float *deviations=nullptr) {
+  r.ready=0;
+  if(deviations){deviations[0]=deviations[1]=0;}
   if(!gray || !valid_reference_regions(r)) return false;
+  bool usable=true;
   for(int k=0;k<2;k++) {
     const auto &b=r.regions[k]; float sum=0,squares=0;
     for(int y=0;y<REF_SIDE;y++) for(int x=0;x<REF_SIDE;x++) {
       const int xx=b[0]+((2*x+1)*(b[2]-b[0]))/(2*REF_SIDE), yy=b[1]+((2*y+1)*(b[3]-b[1]))/(2*REF_SIDE);
       const uint8_t v=gray[yy*640+xx]; r.pixels[k][y*REF_SIDE+x]=v;sum+=v;squares+=float(v)*v;
     }
-    if(squares-sum*sum/REF_PIXELS<REF_PIXELS*64) return false; // At least 8 gray levels standard deviation.
+    const float variance=std::max(0.f,squares/REF_PIXELS-(sum/REF_PIXELS)*(sum/REF_PIXELS));
+    if(deviations)deviations[k]=std::sqrt(variance);
+    if(variance<64)usable=false; // At least 8 gray levels standard deviation.
   }
-  r.ready=1; return true;
+  r.ready=usable;return usable;
 }
 inline AlignmentMatch match_reference(const uint8_t *gray,const AlignmentReference &r,int k) {
   AlignmentMatch best;

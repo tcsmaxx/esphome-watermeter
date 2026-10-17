@@ -132,6 +132,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   void image_setup_();
   bool prepare_image_settings_();
   bool parse_image_options_(AsyncWebServerRequest *request);
+  ImageLimits image_limits_{};
   ImageSettings image_settings_{},pending_image_{},active_image_{},applied_image_{};
   ESPPreferenceObject image_preference_;
   bool image_applied_{false};
@@ -217,6 +218,10 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   std::shared_ptr<uint8_t> displayed_jpeg_, reference_capture_;
   size_t displayed_size_{0}, reference_capture_size_{0};
   uint32_t displayed_frame_{0}, reference_revision_{0}, alignment_ms_{0};
+  uint32_t reference_attempt_{0},pending_reference_id_{0},reference_request_id_{0};
+  bool reference_ok_{false};
+  float reference_contrast_[2]{};
+  std::string reference_message_{"Noch keine Referenzen übernommen"};
   AlignmentMatch alignment_matches_[2]{};
   std::string alignment_result_{"Ausgeschaltet"};
   void update_status_();

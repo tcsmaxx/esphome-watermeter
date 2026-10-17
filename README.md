@@ -125,6 +125,10 @@ Die Bildausrichtung gleicht kleine Bewegungen zwischen Kamera und Zähler aus. S
 4. **Referenzen aus diesem Bild übernehmen** anklicken. Die Muster werden aus genau dem angezeigten Schnappschuss entnommen.
 5. Rahmen testen und mit **Speichern & Automatik starten** Referenzmuster und Positionen dauerhaft sichern.
 
+**Referenzen aus diesem Bild übernehmen** prüft beide eingezeichneten Bereiche. Direkt beim Button erscheinen der laufende Prüfschritt und anschließend **Referenz 1 und 2 übernommen** oder eine konkrete Fehlermeldung. Die Oberfläche wartet auf die zu diesem Auftrag gehörende Ergebnisbestätigung; **Speichern** bleibt bis dahin gesperrt. Erst die bestätigten Referenzen lassen sich dauerhaft sichern. Ein fehlgeschlagener neuer Versuch überschreibt bereits gültige Referenzmuster nicht.
+
+Bei zu wenig Kontrast nennt die Rückmeldung Referenz 1, Referenz 2 oder beide Bereiche. Geeignet sind feste Schrift und deutliche Kanten. Fehler beim Dekodieren oder beim Bildspeicher werden getrennt gemeldet; ein inzwischen nicht mehr verfügbares Referenzbild verlangt eine neue Aufnahme. `/meter/status` enthält `reference_attempt`, `reference_request_id`, `reference_ok`, `reference_message` und die gemessenen Kontrastwerte beider Bereiche unter `reference_contrast`. `reference_revision` erhöht sich ausschließlich bei einer erfolgreichen Übernahme.
+
 Die Referenzbereiche müssen jeweils 16–96 Pixel breit und hoch sein. Ihre Mittelpunkte benötigen mindestens 80 Pixel Abstand. Eine große Distanz und eine Position nahe der Ziffernreihe erleichtern die geometrische Korrektur.
 
 Vor der Erkennung sucht das Gerät beide Referenzen im neuen Kamerabild und rechnet das Bild in die gespeicherten Rahmenkoordinaten zurück. Dieses korrigierte Bild wird für die Ziffernerkennung verwendet. Die Suche umfasst ±20 Pixel je Referenz. Treffer am äußeren Suchrand, uneindeutige Referenzen, Drehungen über 3°, Abstandsänderungen über 3 % oder ungültige korrigierte Ausschnitte führen zur Ablehnung.
@@ -283,10 +287,12 @@ Unter **Einstellungen → Kamera & Fokus → Bildqualität** stehen die Bildpara
 
 | Einstellung | Bereich und Wirkung |
 | --- | --- |
-| Belichtung · Automatik | −2 bis +2; negative Werte nehmen dunkler auf, die automatische Belichtung bleibt aktiv |
-| Kontrast | −2 bis +2; höhere Werte verstärken Hell-Dunkel-Unterschiede |
-| Sättigung | −2 bis +2; negative Werte reduzieren die Farbsättigung |
+| Belichtung · Automatik | OV5640/OV3660: −5 bis +5; negative Werte nehmen dunkler auf, die automatische Belichtung bleibt aktiv |
+| Kontrast | OV5640/OV3660: −3 bis +3; höhere Werte verstärken Hell-Dunkel-Unterschiede |
+| Sättigung | OV5640/OV3660: −4 bis +4; negative Werte reduzieren die Farbsättigung |
 | Weißabgleich | Automatisch, Sonne, bewölkt, Leuchtstofflicht oder warmes Kunstlicht |
+
+Die Oberfläche zeigt die vom erkannten Kameratreiber unterstützten Bereiche. Für andere Kameras bleiben Belichtung, Kontrast und Sättigung auf −2 bis +2 begrenzt. Bei einem Kameratausch werden gespeicherte Werte an die Grenzen der angeschlossenen Kamera angepasst.
 
 **Reflexionen reduzieren** wählt Belichtung −1, Kontrast +1, Sättigung 0 und automatischen Weißabgleich als Ausgangspunkt. **Neutral** setzt alle vier Parameter auf die Standardwerte zurück. Beide Schaltflächen ändern zunächst nur den Entwurf. **Neues Bild**, **Rahmen testen** und der Start des Livebilds verwenden die gewählten Werte; **Alles speichern** übernimmt sie dauerhaft für regelmäßige Ablesungen. Ein Testbild verändert die gespeicherten Bildparameter nicht. Zum Vergleichen einen Satz Werte wählen und anschließend ein neues Bild aufnehmen.
 
@@ -373,6 +379,8 @@ python tests/illumination_flow.py
 python tests/led_count_effect.py
 python tests/led_selection_requests.py
 python tests/image_options.py
+python tests/reference_capture.py
+node tests/reference_ui.cjs
 python tests/image_controls_flow.py
 node tests/image_controls_ui.cjs
 g++ -std=c++17 tests/led_selection.cpp -o /tmp/meter-led-selection && /tmp/meter-led-selection

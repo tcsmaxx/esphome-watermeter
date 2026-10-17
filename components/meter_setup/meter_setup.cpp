@@ -135,11 +135,21 @@ bool MeterSetup::save_configuration_(const Settings &settings,const AlignmentRef
   return true;
 }
 bool MeterSetup::capture_references_() {
-  auto rgb=rotate_image(decode_rgb(reference_capture_.get(),reference_capture_size_),pending_alignment_.rotation_tenths);
-  auto gray=grayscale(rgb);reference_capture_.reset();reference_capture_size_=0;
+  reference_request_id_=pending_reference_id_;++reference_attempt_;reference_ok_=false;reference_contrast_[0]=reference_contrast_[1]=0;
+  const auto fail=[this](const char *reason){reference_capture_.reset();reference_capture_size_=0;reference_message_=reason;message_=reference_message_;ESP_LOGW("meter_setup","%s",reason);return false;};
+  auto rgb=decode_rgb(reference_capture_.get(),reference_capture_size_);reference_capture_.reset();reference_capture_size_=0;
+  if(!rgb)return fail("Referenzen nicht übernommen: Kamerabild konnte nicht dekodiert werden oder Bildspeicher fehlt. Neues Bild aufnehmen.");
+  rgb=rotate_image(rgb,pending_alignment_.rotation_tenths);
+  if(!rgb)return fail("Referenzen nicht übernommen: Speicher für das gedrehte Bild fehlt. Erneut versuchen.");
+  auto gray=grayscale(rgb);
+  if(!gray)return fail("Referenzen nicht übernommen: Speicher für die Auswertung fehlt. Erneut versuchen.");
   auto draft=pending_alignment_;draft.ready=0;
-  if(!gray || !capture_reference(gray.get(),draft)) {draft_alignment_=draft;message_="Referenzen ungeeignet: feste, kontrastreiche Bereiche wählen";return false;}
-  draft_alignment_=draft;++reference_revision_;message_="Referenzen vorbereitet; mit Speichern dauerhaft sichern";return true;
+  if(!valid_reference_regions(draft))return fail("Referenzbereiche ungültig: je 16–96 Pixel groß und mindestens 80 Pixel auseinander wählen.");
+  if(!capture_reference(gray.get(),draft,reference_contrast_)){
+    if(reference_contrast_[0]<8&&reference_contrast_[1]<8)return fail("Referenz 1 und 2 haben zu wenig Kontrast. Feste Schrift oder deutliche Kanten einrahmen.");
+    return fail(reference_contrast_[0]<8?"Referenz 1 hat zu wenig Kontrast. Feste Schrift oder eine deutliche Kante einrahmen.":"Referenz 2 hat zu wenig Kontrast. Feste Schrift oder eine deutliche Kante einrahmen.");
+  }
+  draft_alignment_=draft;++reference_revision_;reference_ok_=true;reference_message_="Referenz 1 und 2 übernommen · mit Alles speichern dauerhaft sichern";message_=reference_message_;return true;
 }
 static std::string quote(const std::string &s) {
   std::string out = "\"";
@@ -268,7 +278,7 @@ void MeterSetup::reset_() {
   }
   settings_=cleared; pending_=cleared;
   alignment_=draft_alignment_=pending_alignment_=active_alignment_=AlignmentReference{};
-  reference_capture_.reset();alignment_result_="Ausgeschaltet";alignment_ms_=0;
+  reference_capture_.reset();reference_ok_=false;reference_message_="Noch keine Referenzen übernommen";alignment_result_="Ausgeschaltet";alignment_ms_=0;
   paused_=true; accepted_=false; test_=false;
   reader_->set_pause_processing(true);
   reader_->set_crop_zones("[]");
@@ -566,6 +576,9 @@ std::string MeterSetup::status_() {
   out+=",\"camera_weak_drive\":";out+=camera_power_.weak_drive()?"true":"false";
   out+=",\"camera_power_status\":";out+=quote(camera_power_.status());
   out+=",\"image_controls_available\":";out+=image_controls_available_()?"true":"false";
+  out+=",\"image_exposure_limit\":";out+=std::to_string(image_limits_.exposure);
+  out+=",\"image_contrast_limit\":";out+=std::to_string(image_limits_.contrast);
+  out+=",\"image_saturation_limit\":";out+=std::to_string(image_limits_.saturation);
   out+=",\"image_exposure\":";out+=std::to_string(image_settings_.exposure);
   out+=",\"image_contrast\":";out+=std::to_string(image_settings_.contrast);
   out+=",\"image_saturation\":";out+=std::to_string(image_settings_.saturation);
@@ -594,6 +607,11 @@ std::string MeterSetup::status_() {
   out+=",\"reference_rotation_tenths\":";out+=std::to_string(draft_alignment_.rotation_tenths);
   out+=",\"reference_ready\":";out+=draft_alignment_.ready?"true":"false";
   out+=",\"reference_revision\":";out+=std::to_string(reference_revision_);
+  out+=",\"reference_request_id\":";out+=std::to_string(reference_request_id_);
+  out+=",\"reference_attempt\":";out+=std::to_string(reference_attempt_);
+  out+=",\"reference_ok\":";out+=reference_ok_?"true":"false";
+  out+=",\"reference_message\":";out+=quote(reference_message_);
+  out+=",\"reference_contrast\":[";out+=std::to_string(reference_contrast_[0]);out+=',';out+=std::to_string(reference_contrast_[1]);out+=']';
   out+=",\"references\":[";
   for(int k=0;k<2;k++){if(k) out+=',';out+='[';for(int j=0;j<4;j++){if(j) out+=',';out+=std::to_string(draft_alignment_.regions[k][j]);}out+=']';}out+=']';
   out+=",\"preview_available\":";out+=preview_?"true":"false";
@@ -780,7 +798,10 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
       }
     }
     if(url=="/meter/reference") {
-      if(!valid_reference_regions(pending_alignment_) || !displayed_jpeg_ || !r->hasParam("frame") || r->getParam("frame")->value()!=std::to_string(displayed_frame_)) {r->send(400,"text/plain; charset=utf-8","Neues Bild aufnehmen; zwei Referenzen 16–96 Pixel groß und mindestens 80 Pixel auseinander wählen");return;}
+      if(!valid_reference_regions(pending_alignment_)){r->send(400,"text/plain; charset=utf-8","Referenzbereiche: je 16–96 Pixel groß und mindestens 80 Pixel auseinander wählen");return;}
+      if(!displayed_jpeg_||!r->hasParam("frame")||r->getParam("frame")->value()!=std::to_string(displayed_frame_)){r->send(400,"text/plain; charset=utf-8","Referenzbild nicht mehr verfügbar. Neues Bild aufnehmen und Referenzen erneut übernehmen.");return;}
+      pending_reference_id_=0;
+      if(r->hasParam("request_id")){const auto id=r->getParam("request_id")->value();if(id.empty()||id.size()>10||id.find_first_not_of("0123456789")!=std::string::npos||std::strtoull(id.c_str(),nullptr,10)>UINT32_MAX){r->send(400,"text/plain","Ungültige Referenz-Auftragsnummer");return;}pending_reference_id_=std::strtoull(id.c_str(),nullptr,10);}
       pending_alignment_.rotation_tenths=rotation;
       reference_capture_=displayed_jpeg_;reference_capture_size_=displayed_size_;command_=REFERENCE;
       r->send(200,"text/plain","Referenzen werden vorbereitet");return;

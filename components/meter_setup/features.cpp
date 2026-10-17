@@ -105,7 +105,7 @@ void MeterSetup::import_config_() {
     if(!root["image"].isNull()){
       auto entry=root["image"];if(!entry.is<JsonObject>()||!entry["exposure"].is<int>()||!entry["contrast"].is<int>()||!entry["saturation"].is<int>()||!entry["white_balance"].is<int>())return false;
       const int exposure=entry["exposure"],contrast=entry["contrast"],saturation=entry["saturation"],wb=entry["white_balance"];
-      if(exposure < -2||exposure>2||contrast < -2||contrast>2||saturation < -2||saturation>2||wb<0||wb>4)return false;
+      if(exposure < -image_limits_.exposure||exposure>image_limits_.exposure||contrast < -image_limits_.contrast||contrast>image_limits_.contrast||saturation < -image_limits_.saturation||saturation>image_limits_.saturation||wb<0||wb>4)return false;
       image.exposure=exposure;image.contrast=contrast;image.saturation=saturation;image.white_balance=wb;
     }
     if(!uint_value(root["warning_after"],30,86400,options.warning_after))return false;
