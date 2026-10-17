@@ -72,6 +72,7 @@ void MeterSetup::features_loop_() {
     if(age_sensor_)age_sensor_->publish_state(reading_age_);
     if(stale_sensor_)stale_sensor_->publish_state(stale_);
   }
+  prepare_public_image_();
   mqtt_loop_();
 }
 void MeterSetup::build_export_() {
@@ -206,14 +207,8 @@ void MeterSetup::mqtt_loop_() {
     });
     if(client->publish(prefix+"/meter/state",std::string(payload),0,true))mqtt_state_at_=millis()?millis():1;
   }
-  if(!busy_&&!test_&&inference_jpeg_&&mqtt_image_sequence_!=preview_sequence_) {
-    if(timestamped_sequence_!=preview_sequence_){
-      auto annotated=timestamp_jpeg(inference_jpeg_.get(),inference_jpeg_size_,inference_capture_epoch_);
-      if(annotated.data){inference_jpeg_=std::move(annotated.data);inference_jpeg_size_=annotated.size;}
-      else ESP_LOGW("meter_setup","Zeitstempel im MQTT-Bild fehlgeschlagen; Rohbild übertragen");
-      timestamped_sequence_=preview_sequence_;
-    }
-    if(client->publish(prefix+"/camera/image",reinterpret_cast<const char*>(inference_jpeg_.get()),inference_jpeg_size_,0,true))mqtt_image_sequence_=preview_sequence_;
+  if(!busy_&&!test_&&public_image_.data&&timestamped_sequence_==preview_sequence_&&mqtt_image_sequence_!=preview_sequence_) {
+    if(client->publish(prefix+"/camera/image",reinterpret_cast<const char*>(public_image_.data.get()),public_image_.size,0,true))mqtt_image_sequence_=preview_sequence_;
   }
 #endif
 }

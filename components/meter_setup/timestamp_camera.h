@@ -16,6 +16,7 @@ class TimestampCamera : public camera::Camera, public camera::CameraListener {
   void setup() override;
   void loop() override;
   void set_power(CameraPowerController *power){power_=power;}
+  void set_processed_image(const TimestampJpeg &jpeg);
   float get_setup_priority() const override {return setup_priority::IO-1;}
   void add_listener(camera::CameraListener *listener) override {listeners_.push_back(listener);}
   camera::CameraImageReader *create_image_reader() override;
@@ -29,7 +30,7 @@ class TimestampCamera : public camera::Camera, public camera::CameraListener {
   explicit TimestampCamera(esp32_camera::ESP32Camera *source):source_(source){}
   esp32_camera::ESP32Camera *source_;
   CameraPowerController *power_{nullptr};
-  std::shared_ptr<camera::CameraImage> cached_;
+  std::shared_ptr<camera::CameraImage> cached_,processed_;
   uint8_t pending_requests_{0},streams_{0},active_streams_{0};
   std::vector<camera::CameraListener *> listeners_;
 };

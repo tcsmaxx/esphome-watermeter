@@ -39,7 +39,7 @@ TimestampJpeg timestamp_jpeg(const uint8_t *data,size_t size,std::time_t capture
 }
 class TimestampImage : public camera::CameraImage {
  public:
-  TimestampImage(TimestampJpeg jpeg,const std::shared_ptr<camera::CameraImage> &source):jpeg_(std::move(jpeg)){for(int i=0;i<3;i++)requested_[i]=source->was_requested_by(static_cast<camera::CameraRequester>(i));}
+  TimestampImage(TimestampJpeg jpeg,const std::shared_ptr<camera::CameraImage> &source):jpeg_(std::move(jpeg)){for(int i=0;i<3;i++)requested_[i]=source&&source->was_requested_by(static_cast<camera::CameraRequester>(i));}
   uint8_t *get_data_buffer() override {return jpeg_.data.get();}
   size_t get_data_length() override {return jpeg_.size;}
   bool was_requested_by(camera::CameraRequester r) const override {return int(r)<3&&(r==camera::API_REQUESTER||requested_[int(r)]);}
@@ -67,6 +67,7 @@ void TimestampCamera::setup() {
 }
 camera::CameraImageReader *TimestampCamera::create_image_reader(){return new TimestampImageReader;}
 void TimestampCamera::loop() {
+  if(!streams_&&processed_)cached_=processed_;
   if(pending_requests_&&cached_&&!streams_){
     // Ordinary HA still-image polling reuses the last real capture without heat.
     for(auto *listener:listeners_)listener->on_camera_image(cached_);
@@ -78,7 +79,14 @@ void TimestampCamera::loop() {
   for(int i=0;i<3;i++)if(pending_requests_&(1U<<i))source_->request_image(static_cast<camera::CameraRequester>(i));
   pending_requests_=0;
 }
+void TimestampCamera::set_processed_image(const TimestampJpeg &jpeg) {
+  if(!jpeg.data){processed_.reset();cached_.reset();return;}
+  processed_=std::make_shared<TimestampImage>(jpeg,nullptr);
+  cached_=processed_;
+  if(!streams_)for(auto *listener:listeners_)listener->on_camera_image(processed_);
+}
 void TimestampCamera::on_camera_image(const std::shared_ptr<camera::CameraImage> &image) {
+  if(processed_&&!streams_){cached_=processed_;for(auto *listener:listeners_)listener->on_camera_image(processed_);return;}
   if(listeners_.empty())return;
   auto jpeg=timestamp_jpeg(image->get_data_buffer(),image->get_data_length(),camera_capture_epoch(image));
   if(!jpeg.data){ESP_LOGW("meter_setup","Zeitstempel im API-Bild fehlgeschlagen; Rohbild übertragen");for(auto *listener:listeners_)listener->on_camera_image(image);return;}

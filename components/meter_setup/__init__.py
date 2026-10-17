@@ -84,6 +84,7 @@ async def to_code(config):
     await cg.register_component(public_camera, {})
     cg.add(physical_camera.set_idle_update_interval(0))
     cg.add(public_camera.set_power(var.get_camera_power()))
+    cg.add(var.set_public_camera(public_camera))
     reader = await cg.get_variable(config['reader_id'])
     cg.add(reader.set_alignment_owner(var))
     cg.add(var.set_value(await sensor.new_sensor(config['value'])))

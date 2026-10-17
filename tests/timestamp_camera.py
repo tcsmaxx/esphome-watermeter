@@ -86,6 +86,9 @@ int main(){
  encoder_fail=true;proxy->on_camera_image(raw);assert(api.last==raw&&ocr.last==raw);
  CameraPowerController power;proxy->set_power(&power);auto held=api.last;proxy->request_image(camera::API_REQUESTER);proxy->loop();assert(physical.requests==0&&power.requests==0); // cached still polls never wake the sensor
  power.awake=false;proxy->start_stream(camera::API_REQUESTER);proxy->loop();assert(physical.starts==1&&power.requests==1);power.awake=true;proxy->loop();assert(physical.starts==2&&power.requests==2);proxy->stop_stream(camera::API_REQUESTER);assert(physical.stops==2);
+ encoder_fail=false;auto preferred=TimestampJpeg{std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,88,217},std::default_delete<uint8_t[]>()),4};proxy->set_processed_image(preferred);assert(api.last->get_data_buffer()[2]==88&&api.last->was_requested_by(camera::API_REQUESTER));auto chosen=api.last;int before=encodes;proxy->on_camera_image(raw);assert(api.last==chosen&&encodes==before);proxy->request_image(camera::API_REQUESTER);proxy->loop();assert(api.last==chosen&&physical.requests==0);
+ proxy->start_stream(camera::API_REQUESTER);proxy->loop();proxy->on_camera_image(raw);assert(api.last!=chosen&&encodes==before+1);proxy->stop_stream(camera::API_REQUESTER);proxy->request_image(camera::API_REQUESTER);proxy->loop();assert(api.last==chosen);
+ proxy->set_processed_image({});proxy->on_camera_image(raw);assert(api.last!=chosen&&ocr.last==raw);
  delete proxy;
  std::cout<<"Timestamp camera passed: German capture time, bounded overlay, untouched OCR source, unsynchronized clock, camera identity, API reader lifetime, stream forwarding and codec failure fallback\n";
 }

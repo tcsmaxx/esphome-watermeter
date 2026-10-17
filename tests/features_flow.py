@@ -6,6 +6,7 @@ header=(root/'components/meter_setup/meter_setup.h').read_text();cpp=(root/'comp
 structs=header[header.index('struct Settings {'):header.index('class MeterSetup;')]
 settings_flow=(root/"components/meter_setup/settings_flow.cpp").read_text()
 all_save=settings_flow[settings_flow.index("bool MeterSetup::save_all_()"):settings_flow.rfind("\n}")]
+public_methods=(root/'components/meter_setup/public_camera.cpp').read_text().split('namespace esphome::meter_setup {',1)[1].rsplit('}',1)[0]
 methods=features[features.index('void MeterSetup::capture_digit_log_('):features.rfind('\n}')]
 a=methods.index('void AlignedMeterReader::loop()');b=methods.index('void MeterSetup::features_loop_()',a);methods=methods[:a]+methods[b:]
 save_body=cpp[cpp.index('    if(cmd==SAVE) {')+len('    if(cmd==SAVE) {'):cpp.index('    } else {\n      reader_->set_crop_zones')]
@@ -30,6 +31,7 @@ constexpr int MAC_ADDRESS_BUFFER_SIZE=13;
 void get_mac_address_into_buffer(char *b){std::strcpy(b,"112233aabbcc");}
 uint32_t tick=0;uint32_t millis(){return tick;}
 struct TimestampJpeg{std::shared_ptr<uint8_t> data;size_t size=0;};
+struct TimestampCamera{TimestampJpeg last;void set_processed_image(const TimestampJpeg &j){last=j;}};
 int annotation_count=0;std::time_t annotated_capture=0;TimestampJpeg timestamp_jpeg(const uint8_t*,size_t,std::time_t captured){++annotation_count;annotated_capture=captured;return {};}
 namespace json {
 template<class F>std::string build_json(F f){JsonDocument doc;f(doc.to<JsonObject>());std::string out;serializeJson(doc,out);return out;}
@@ -62,6 +64,10 @@ public:
  std::string export_json_,pending_import_,message_,reading_error_,confidence_digits_,digits_;float digit_confidences_[9]{},reading_age_=NAN,confidence_=0;
  uint32_t pending_warning_after_=0,next_=0,health_updated_=0,last_accepted_at_=0,boot_started_=0,config_revision_=0,mqtt_image_sequence_=0,preview_sequence_=1;
  std::shared_ptr<uint8_t> preview_,inference_jpeg_;size_t preview_size_=0,inference_jpeg_size_=0;std::time_t inference_capture_epoch_=0;uint32_t timestamped_sequence_=0;
+ TimestampCamera proxy;TimestampCamera *public_camera_=&proxy;TimestampJpeg public_image_;
+ std::shared_ptr<uint8_t> preview_jpeg_;size_t preview_jpeg_size_=0;uint32_t preview_jpeg_sequence_=0;bool preview_rgb_=false,encode_fail=false;
+ void prepare_preview_(){if(encode_fail)return;preview_jpeg_=preview_;preview_jpeg_size_=preview_size_;preview_jpeg_sequence_=preview_sequence_;}
+ void prepare_public_image_();
  Sensor changes,flows,value,confidence;Sensor *change_=&changes,*flow_=&flows,*value_=&value,*confidence_sensor_=&confidence,*digit_sensors_[9]{};Text *last_update_=nullptr,*status_sensor_=nullptr,*error_sensor_=nullptr;
  bool confidence_pending_=false;uint32_t confidence_finished_at_=0,mqtt_state_at_=0;uint8_t mqtt_discovery_index_=0;
  Sensor age;Sensor *age_sensor_=&age;Binary stale;Binary *stale_sensor_=&stale;Reader reader;Reader *reader_=&reader;
@@ -79,7 +85,7 @@ public:
  void capture_digit_scores_(const std::string&,const float*);
  void capture_digit_log_(const char*,const char*,size_t);void features_loop_();void build_export_();void import_config_();void mqtt_loop_();
 };
-'''+validation+methods+all_save+r'''
+'''+validation+methods+all_save+public_methods+r'''
 int main(){
  MeterSetup original;original.settings_.calibrated=1;original.settings_.rotation_tenths=-123;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.image_settings_.exposure=-5;original.image_settings_.contrast=3;original.image_settings_.saturation=-4;original.image_settings_.white_balance=3;original.illumination_settings_.led_count=6;original.illumination_settings_.led_mask=0x8000000000000025ULL;
  for(int i=0;i<8;i++){auto &b=original.settings_.boxes[i];b[0]=20+i*50;b[1]=100;b[2]=b[0]+30;b[3]=150;}
@@ -100,13 +106,17 @@ int main(){
  restored.busy_=false;restored.confidence_pending_=true;restored.confidence_finished_at_=tick;restored.digits_="01864266";Sensor digit;restored.digit_sensors_[4]=&digit;
  restored.capture_digit_log_("meter_reader_tflite",log.data(),log.size());assert(!restored.confidence_pending_&&std::abs(digit.state-93.4f)<.01f);
  restored.confidence_digits_.clear();restored.confidence_pending_=true;tick+=3001;restored.capture_digit_log_("meter_reader_tflite",log.data(),log.size());assert(restored.confidence_digits_.empty());
- mqtt::client.messages.clear();restored.mqtt_discovered_=false;restored.mqtt_discovery_index_=0;restored.mqtt_state_at_=0;restored.busy_=false;restored.test_=false;restored.inference_jpeg_=std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,0,217},std::default_delete<uint8_t[]>());restored.inference_jpeg_size_=4;restored.inference_capture_epoch_=1791805539;restored.mqtt_loop_();assert(mqtt::client.messages.size()==3);
+ mqtt::client.messages.clear();restored.mqtt_discovered_=false;restored.mqtt_discovery_index_=0;restored.mqtt_state_at_=0;restored.busy_=false;restored.test_=false;restored.inference_jpeg_=std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,0,217},std::default_delete<uint8_t[]>());restored.inference_jpeg_size_=4;restored.inference_capture_epoch_=1791805539;restored.prepare_public_image_();restored.mqtt_loop_();assert(mqtt::client.messages.size()==3);
  assert(annotation_count==1&&annotated_capture==1791805539);JsonDocument discovery;deserializeJson(discovery,mqtt::client.messages[0].payload);assert(discovery["device"]["identifiers"]=="112233aabbcc"&&discovery["topic"]=="test/camera/image"&&discovery["availability_topic"]=="test/status");assert(mqtt::client.messages[2].payload.size()==4&&mqtt::client.messages[2].payload[2]==0&&mqtt::client.messages[2].retain);
  for(int i=0;i<19;i++)restored.mqtt_loop_();assert(restored.mqtt_discovered_&&restored.mqtt_discovery_index_==20&&mqtt::client.messages.size()==22);
  for(int i=3;i<22;i++){if(mqtt::client.messages[i].payload.empty()){assert(mqtt::client.messages[i].topic.find("confidence_9/config")!=std::string::npos);continue;}JsonDocument d;deserializeJson(d,mqtt::client.messages[i].payload);assert(d["state_topic"]=="test/meter/state"&&d["device"]["identifiers"]=="112233aabbcc");}
  JsonDocument state;deserializeJson(state,mqtt::client.messages[1].payload);assert(state["confidence_5"].as<float>()>93&&state["value"].isNull());
- restored.mqtt_loop_();assert(mqtt::client.messages.size()==22);restored.test_=true;++restored.preview_sequence_;restored.mqtt_loop_();assert(mqtt::client.messages.size()==22);restored.test_=false;mqtt::client.success=false;restored.mqtt_loop_();assert(restored.mqtt_image_sequence_==1);mqtt::client.success=true;restored.mqtt_loop_();assert(mqtt::client.messages.size()==23);
+ restored.mqtt_loop_();assert(mqtt::client.messages.size()==22);restored.test_=true;++restored.preview_sequence_;restored.prepare_public_image_();restored.mqtt_loop_();assert(mqtt::client.messages.size()==22);restored.test_=false;mqtt::client.success=false;restored.mqtt_loop_();assert(restored.mqtt_image_sequence_==1);mqtt::client.success=true;restored.mqtt_loop_();assert(mqtt::client.messages.size()==23);
  mqtt::client.connected=false;restored.mqtt_loop_();assert(restored.mqtt_discovery_index_==0&&!restored.mqtt_discovered_);mqtt::client.connected=true;restored.mqtt_loop_();assert(restored.mqtt_discovery_index_==1);
+ // Both public transports use the corrected JPEG; timestamp failures keep that geometry.
+ restored.preview_=std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,88,217},std::default_delete<uint8_t[]>());restored.preview_size_=4;restored.preview_rgb_=true;++restored.preview_sequence_;restored.prepare_public_image_();assert(restored.public_image_.data.get()[2]==88&&restored.proxy.last.data==restored.public_image_.data);restored.mqtt_loop_();assert(mqtt::client.messages.back().payload[2]==88);auto raw_before=restored.inference_jpeg_;assert(raw_before.get()[2]==0);int before_annotation=annotation_count;restored.prepare_public_image_();assert(annotation_count==before_annotation);
+ restored.preview_.reset();++restored.preview_sequence_;restored.prepare_public_image_();assert(restored.proxy.last.data==raw_before&&restored.public_image_.data.get()[2]==0);restored.mqtt_loop_();assert(mqtt::client.messages.back().payload[2]==0);
+ restored.preview_=std::shared_ptr<uint8_t>(new uint8_t[4]{255,216,99,217},std::default_delete<uint8_t[]>());restored.preview_jpeg_.reset();restored.encode_fail=true;++restored.preview_sequence_;restored.prepare_public_image_();assert(restored.public_image_.data==raw_before);restored.busy_=true;++restored.preview_sequence_;before_annotation=annotation_count;restored.prepare_public_image_();assert(annotation_count==before_annotation);restored.busy_=false;
  JsonDocument old_backup;deserializeJson(old_backup,original.export_json_);old_backup["settings"].remove("rotation_tenths");old_backup.remove("autofocus_before_reading");old_backup.remove("manual_focus_enabled");old_backup.remove("manual_focus_position");old_backup.remove("camera_standby");old_backup.remove("camera_weak_drive");MeterSetup legacy;legacy.camera_power_.standby=false;legacy.camera_power_.weak=true;serializeJson(old_backup,legacy.pending_import_);legacy.import_config_();assert(legacy.config_revision_==1&&legacy.settings_.rotation_tenths==0&&legacy.autofocus_settings_.before_reading==1&&!legacy.camera_power_.standby_enabled()&&legacy.camera_power_.weak_drive());
  for(const auto bad_angle:{"1801","-1801","1.5","\"90\"","true"}){JsonDocument d;deserializeJson(d,original.export_json_);d["settings"]["rotation_tenths"]=serialized(bad_angle);MeterSetup bad;serializeJson(d,bad.pending_import_);bad.import_config_();assert(bad.config_revision_==0);}
  MeterSetup failed_focus_save;failed_focus_save.pending_import_=original.export_json_;failed_focus_save.autofocus_preference_.fail_next=true;failed_focus_save.import_config_();assert(failed_focus_save.config_revision_==0&&failed_focus_save.autofocus_settings_.before_reading==1&&failed_focus_save.saved.settings.baseline==0);

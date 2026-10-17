@@ -83,6 +83,7 @@ class CountedWhiteEffect : public light::AddressableLightEffect {
 };
 class MeterSetup : public Component, public camera::CameraListener, public AsyncWebHandler {
  public:
+  void set_public_camera(TimestampCamera *camera){public_camera_=camera;}
   std::shared_ptr<camera::CameraImage> align_image_(const std::shared_ptr<camera::CameraImage> &image);
   void set_illumination(light::AddressableLightState *v) {illumination_=v;v->add_effects({&illumination_effect_});}
   CameraPowerController *get_camera_power(){return &camera_power_;}
@@ -174,6 +175,9 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   size_t inference_jpeg_size_{0};
   std::time_t inference_capture_epoch_{0};
   uint32_t timestamped_sequence_{0};
+  TimestampCamera *public_camera_{nullptr};
+  TimestampJpeg public_image_;
+  void prepare_public_image_();
   void set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,bool rgb);
   std::shared_ptr<uint8_t> preview_;
   size_t preview_size_{0};
