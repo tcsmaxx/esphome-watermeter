@@ -6,6 +6,7 @@
 #include "timestamp_camera.h"
 #include "autofocus.h"
 #include "alignment.h"
+#include "led_selection.h"
 #include "esphome/components/light/addressable_light_effect.h"
 #include "esp_heap_caps.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -52,11 +53,18 @@ struct LegacyIlluminationSettings {
   uint16_t settle_ms{1000};
   uint8_t enabled{0}, brightness{30};
 };
-struct IlluminationSettings {
+struct LegacyCountedIlluminationSettings {
   uint32_t version{2};
   uint16_t settle_ms{1000};
   uint8_t enabled{0}, brightness{30};
   uint16_t led_count{8};
+};
+struct IlluminationSettings {
+  uint32_t version{3};
+  uint16_t settle_ms{1000};
+  uint8_t enabled{0}, brightness{30};
+  uint16_t led_count{8};
+  uint64_t led_mask{UINT64_MAX};
 };
 class MeterSetup;
 class CountedWhiteEffect : public light::AddressableLightEffect {
@@ -68,6 +76,7 @@ class CountedWhiteEffect : public light::AddressableLightEffect {
   MeterSetup *owner_;
   bool initial_{true};
   uint16_t last_count_{0};
+  uint64_t last_mask_{0};
   float last_brightness_{-1};
   Color last_color_{};
 };
@@ -77,6 +86,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   void set_illumination(light::AddressableLightState *v) {illumination_=v;v->add_effects({&illumination_effect_});}
   CameraPowerController *get_camera_power(){return &camera_power_;}
   uint16_t get_active_led_count() const {return illumination_led_count_;}
+  uint64_t get_active_led_mask() const {return illumination_led_mask_;}
   uint16_t led_capacity_() const;
   bool accepts_reader_frame_();
   void set_camera(esp32_camera::ESP32Camera *v) { camera_ = v; }
@@ -184,6 +194,7 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   light::AddressableLightState *illumination_{nullptr};
   CountedWhiteEffect illumination_effect_{this};
   uint16_t illumination_led_count_{8};
+  uint64_t illumination_led_mask_{UINT64_MAX};
   ESPPreferenceObject illumination_preference_;
   IlluminationSettings illumination_settings_{},pending_illumination_{};
   bool capture_pending_{false}, capture_inference_{false}, flush_received_{false}, inference_started_{false};

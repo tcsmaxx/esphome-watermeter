@@ -15,8 +15,8 @@ struct AddressableLight {std::vector<Color> pixels=std::vector<Color>(64);int sh
 struct Values {float brightness=.3;float get_brightness()const{return brightness;}};
 struct State {Values current_values;};
 }
-struct MeterSetup {uint16_t count=8;uint16_t get_active_led_count()const{return count;}};
-struct CountedWhiteEffect {MeterSetup *owner_;light::State *state_;bool initial_=true;uint16_t last_count_=0;float last_brightness_=-1;Color last_color_{};void apply(light::AddressableLight&,const Color&);};
+struct MeterSetup {uint16_t count=8;uint64_t mask=UINT64_MAX;uint16_t get_active_led_count()const{return count;}uint64_t get_active_led_mask()const{return mask;}};
+struct CountedWhiteEffect {MeterSetup *owner_;light::State *state_;bool initial_=true;uint16_t last_count_=0;uint64_t last_mask_=0;float last_brightness_=-1;Color last_color_{};void apply(light::AddressableLight&,const Color&);};
 '''+apply+r'''
 int main(){
  MeterSetup owner;light::State state;light::AddressableLight strip;CountedWhiteEffect effect{&owner,&state};Color white(0,0,0,255);
@@ -26,7 +26,11 @@ int main(){
  owner.count=64;effect.apply(strip,white);for(auto pixel:strip.pixels)assert(pixel.raw==255);
  state.current_values.brightness=.6;effect.apply(strip,white);assert(strip.shows==4); // Brightness changes rewrite corrected pixels.
  effect.initial_=true;effect.apply(strip,white);assert(strip.shows==5); // Turning on again always repaints.
- std::cout<<"LED count effect passed: exact prefix, excess dark after shrink, full capacity, brightness/restart refresh, unchanged-state suppression\n";
+ owner.mask=(uint64_t(1)<<63)|1;effect.apply(strip,white);for(int i=0;i<64;i++)assert(strip[i].raw==((i==0||i==63)?255u:0u));
+ int shows=strip.shows;effect.apply(strip,white);assert(strip.shows==shows);
+ owner.mask=0;effect.apply(strip,white);for(auto pixel:strip.pixels)assert(pixel.raw==0);
+ owner.mask=UINT64_MAX;owner.count=8;effect.apply(strip,white);for(int i=0;i<64;i++)assert(strip[i].raw==(i<8?255u:0u));
+ std::cout<<"LED count and individual selection effect passed: exact prefix, excess dark after shrink, full capacity, brightness/restart refresh, unchanged-state suppression\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='meter-led-count-') as temp:

@@ -21,7 +21,7 @@ source = r'''
 #define ESPHOME_LOOP_TASK_STACK_SIZE 32768
 uint32_t millis(){return 100;}
 unsigned uxTaskGetStackHighWaterMark(void *) { return 24000; }
-'''+f'#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+settings+quote+zones+r'''
+'''+f'#include "{root / "components/meter_setup/led_selection.h"}"\n#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+settings+quote+zones+r'''
 class MeterSetup {
  public:
  uint8_t result_decimals_=3;
@@ -58,6 +58,7 @@ with tempfile.TemporaryDirectory(prefix="meter-status-test-") as directory:
  assert [row["confidence"] for row in rows] == [73.4, 0, 0]
  assert rows[0]["message"] == 'Test "ok"'
  assert rows[0]["digits"] == "00123456"
+ assert rows[0]["illumination_led_mask"] == "ffffffffffffffff"
  assert rows[0]["loop_stack_size"] == 32768
  assert rows[0]["loop_stack_free"] == 24000
  assert rows[0]["http_task"] == "httpd"

@@ -83,7 +83,7 @@ void MeterSetup::build_export_() {
     auto boxes=s["boxes"].to<JsonArray>();for(int i=0;i<settings_.digit_count;i++){auto row=boxes.add<JsonArray>();for(auto v:settings_.boxes[i])row.add(v);}
     auto a=root["alignment"].to<JsonObject>();a["enabled"]=bool(alignment_.enabled);a["ready"]=bool(alignment_.ready);a["pixels"]=pixels;
     auto regions=a["regions"].to<JsonArray>();for(const auto &box:alignment_.regions){auto row=regions.add<JsonArray>();for(auto v:box)row.add(v);}
-    auto l=root["illumination"].to<JsonObject>();l["enabled"]=bool(illumination_settings_.enabled);l["brightness"]=illumination_settings_.brightness;l["settle_ms"]=illumination_settings_.settle_ms;l["led_count"]=illumination_settings_.led_count;
+    auto l=root["illumination"].to<JsonObject>();l["enabled"]=bool(illumination_settings_.enabled);l["brightness"]=illumination_settings_.brightness;l["settle_ms"]=illumination_settings_.settle_ms;l["led_count"]=illumination_settings_.led_count;l["led_mask"]=format_led_mask(illumination_settings_.led_mask);
   });
 }
 void MeterSetup::import_config_() {
@@ -123,6 +123,7 @@ void MeterSetup::import_config_() {
     if(refs.ready)for(const auto &row:refs.pixels){float sum=0,sq=0;for(auto x:row){sum+=x;sq+=float(x)*x;}if(sq-sum*sum/256<256*64)return false;}
     auto l=root["illumination"].as<JsonObject>();if(!l["enabled"].is<bool>()||!uint_value(l["brightness"],1,100,v))return false;light.brightness=v;light.enabled=l["enabled"].as<bool>();
     if(!uint_value(l["settle_ms"],0,5000,v))return false;light.settle_ms=v;if(!uint_value(l["led_count"],1,led_capacity_(),v))return false;light.led_count=v;
+    if(!l["led_mask"].isNull()&&(!l["led_mask"].is<const char*>()||!parse_led_mask(l["led_mask"].as<const char*>(),light.led_mask)))return false;
     return true;
   });
   pending_import_.clear();

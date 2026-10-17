@@ -17,10 +17,12 @@ bool MeterSetup::parse_options_(AsyncWebServerRequest *r,bool power) {
      (power&&(!number("standby",0,1,standby)||!number("weak_drive",0,1,weak)))){
     r->send(400,"text/plain; charset=utf-8","Fokus, Beleuchtung oder Stromspareinstellung ungültig");return false;
   }
+  uint64_t mask=illumination_settings_.led_mask;
+  if(r->hasParam("led_mask")&&!parse_led_mask(r->getParam("led_mask")->value(),mask)){r->send(400,"text/plain; charset=utf-8","LED-Auswahl ungültig");return false;}
   pending_manual_focus_=r->getParam("focus_mode")->value()=="manual";
   pending_autofocus_=!pending_manual_focus_;pending_focus_position_=position;
   pending_illumination_=illumination_settings_;pending_illumination_.enabled=enabled;pending_illumination_.led_count=count;
-  pending_illumination_.brightness=brightness;pending_illumination_.settle_ms=settle;
+  pending_illumination_.led_mask=mask;pending_illumination_.brightness=brightness;pending_illumination_.settle_ms=settle;
   if(power){pending_standby_=standby;pending_weak_drive_=weak;}
   return true;
 }

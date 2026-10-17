@@ -69,15 +69,16 @@ int main(){
  // The previous 8-byte LED settings migrate without altering brightness/timing.
  LegacyIlluminationSettings previous;previous.enabled=1;previous.brightness=55;previous.settle_ms=1200;
  globals.make_preference<LegacyIlluminationSettings>(0x7a32b904).save(&previous);
- MeterSetup migration;migration.load_();assert(migration.illumination_settings_.version==2&&migration.illumination_settings_.enabled&&migration.illumination_settings_.brightness==55&&migration.illumination_settings_.settle_ms==1200&&migration.illumination_settings_.led_count==8);
- storage.clear();
+ MeterSetup migration;migration.load_();assert(migration.illumination_settings_.version==3&&migration.illumination_settings_.enabled&&migration.illumination_settings_.brightness==55&&migration.illumination_settings_.settle_ms==1200&&migration.illumination_settings_.led_count==8);
+ assert(migration.illumination_settings_.led_mask==UINT64_MAX);
+ storage.clear();LegacyCountedIlluminationSettings v2;v2.led_count=13;v2.enabled=1;v2.brightness=61;v2.settle_ms=700;globals.make_preference<LegacyCountedIlluminationSettings>(0x7a32b906).save(&v2);MeterSetup migrated_v2;migrated_v2.load_();assert(migrated_v2.illumination_settings_.led_count==13&&migrated_v2.illumination_settings_.brightness==61&&migrated_v2.illumination_settings_.settle_ms==700&&migrated_v2.illumination_settings_.led_mask==UINT64_MAX);storage.clear();
  light::LightState lamp;auto img=std::make_shared<camera::CameraImage>();
  MeterSetup owner;owner.illumination_=&lamp;owner.load_();assert(!lamp.on&&!owner.illumination_settings_.enabled);
  owner.busy_=true;owner.begin_capture_(true);assert(owner.reader.updates==1&&owner.reader.arms==1&&owner.camera.requests==1&&owner.accepts_reader_frame_()); // Disabled path has no extra delay.
- IlluminationSettings options;options.enabled=1;options.brightness=45;options.settle_ms=1000;options.led_count=6;
+ IlluminationSettings options;options.enabled=1;options.brightness=45;options.settle_ms=1000;options.led_count=6;options.led_mask=0x25;
  assert(owner.save_illumination_(options));owner.pending_illumination_=options;
- MeterSetup reboot;reboot.illumination_=&lamp;reboot.load_();assert(reboot.illumination_settings_.led_count==6&&reboot.illumination_settings_.brightness==45&&!lamp.on);
- MeterSetup photo;photo.illumination_=&lamp;photo.load_();photo.begin_capture_(false);assert(lamp.on&&lamp.brightness==.45f&&photo.camera.requests==0);
+ MeterSetup reboot;reboot.illumination_=&lamp;reboot.load_();assert(reboot.illumination_settings_.led_mask==0x25&&reboot.illumination_settings_.led_count==6&&reboot.illumination_settings_.brightness==45&&!lamp.on);
+ MeterSetup photo;photo.illumination_=&lamp;photo.load_();photo.begin_capture_(false);assert(photo.illumination_led_mask_==0x25&&lamp.on&&lamp.brightness==.45f&&photo.camera.requests==0);
  photo.on_camera_image(img);assert(photo.frame_==0);now=1099;photo.illumination_loop_();assert(photo.camera.requests==0);
  now=1100;photo.illumination_loop_();assert(photo.camera.requests==1&&photo.capture_stage_==1);photo.on_camera_image(img);assert(photo.frame_==0&&photo.flush_received_);
  photo.illumination_loop_();assert(photo.camera.requests==2&&photo.capture_pending_);photo.on_camera_image(img);assert(photo.frame_==1&&!photo.capture_pending_&&!lamp.on);
@@ -87,7 +88,7 @@ int main(){
  MeterSetup timeout;timeout.illumination_=&lamp;timeout.load_();timeout.busy_=true;timeout.begin_capture_(true);now+=15001;timeout.illumination_loop_();assert(!lamp.on&&!timeout.busy_&&!timeout.capture_pending_&&timeout.reading_problem_&&timeout.reader.updates==0);
  owner.light_test_=true;owner.pending_illumination_.brightness=70;owner.light_test_deadline_=now+120000;owner.begin_capture_(false);assert(lamp.on&&lamp.brightness==.7f);now+=1000;owner.illumination_loop_();owner.on_camera_image(img);owner.illumination_loop_();owner.on_camera_image(img);assert(lamp.on);owner.busy_=false;now+=120000;owner.illumination_loop_();assert(!owner.light_test_&&!lamp.on);
  globals.success=false;options.brightness=80;assert(!reboot.save_illumination_(options));assert(reboot.illumination_settings_.brightness==45);IlluminationSettings rolled;reboot.illumination_preference_.load(&rolled);assert(rolled.brightness==45);globals.success=true;
- lamp.output.capacity=2;reboot.reset_illumination_();assert(reboot.illumination_settings_.led_count==2);MeterSetup cleared;cleared.load_();assert(!cleared.illumination_settings_.enabled&&!lamp.on);
+ lamp.output.capacity=2;reboot.reset_illumination_();assert(reboot.illumination_settings_.led_count==2);MeterSetup cleared;cleared.load_();assert(!cleared.illumination_settings_.enabled&&cleared.illumination_settings_.led_mask==UINT64_MAX&&!lamp.on);
  std::cout<<"Illumination flow passed: persistence/rollback/reset, disabled path, white channel, warmup, stale-frame discard, inference handoff, timeout shutoff, manual preview and 2-minute limit\n";
 }
 '''

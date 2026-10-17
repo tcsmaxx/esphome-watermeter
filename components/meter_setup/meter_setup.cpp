@@ -12,10 +12,11 @@
 namespace esphome::meter_setup {
 void CountedWhiteEffect::apply(light::AddressableLight &it,const Color &color) {
   const auto count=owner_->get_active_led_count();
+  const auto mask=owner_->get_active_led_mask();
   const float brightness=this->state_->current_values.get_brightness();
-  if(!initial_ && count==last_count_ && brightness==last_brightness_ && last_color_==color) return;
-  for(int i=0;i<it.size();i++) it[i]=i<count?color:Color(0,0,0,0);
-  it.schedule_show();initial_=false;last_count_=count;last_brightness_=brightness;last_color_=color;
+  if(!initial_ && count==last_count_ && mask==last_mask_ && brightness==last_brightness_ && last_color_==color) return;
+  for(int i=0;i<it.size();i++) it[i]=(i<count && i<64 && (mask&(uint64_t(1)<<i)))?color:Color(0,0,0,0);
+  it.schedule_show();initial_=false;last_count_=count;last_mask_=mask;last_brightness_=brightness;last_color_=color;
 }
 static std::string zones(const Settings &s);
 using ImageBuffer=std::shared_ptr<uint8_t>;
@@ -191,20 +192,27 @@ void MeterSetup::setup() {
     if(settings_.calibrated)reader_->set_crop_zones(zones(settings_));
   }
   draft_alignment_=alignment_;
-  illumination_preference_=global_preferences->make_preference<IlluminationSettings>(0x7a32b906);
+  illumination_preference_=global_preferences->make_preference<IlluminationSettings>(0x7a32b90c);
   IlluminationSettings saved_light;
   const bool have_light=illumination_preference_.load(&saved_light);
   const auto valid_light=[this](const IlluminationSettings &v) {
-    return v.version==2 && v.enabled<=1 && v.brightness>=1 && v.brightness<=100 && v.settle_ms<=5000 && v.led_count>=1 && v.led_count<=led_capacity_();
+    return v.version==3 && v.enabled<=1 && v.brightness>=1 && v.brightness<=100 && v.settle_ms<=5000 && v.led_count>=1 && v.led_count<=led_capacity_();
   };
   if(have_light && valid_light(saved_light)) illumination_settings_=saved_light;
   else if(!have_light) {
-    auto legacy=global_preferences->make_preference<LegacyIlluminationSettings>(0x7a32b904);
-    LegacyIlluminationSettings old;
-    if(legacy.load(&old) && old.version==1) {
-      saved_light.enabled=old.enabled;saved_light.brightness=old.brightness;saved_light.settle_ms=old.settle_ms;
-      saved_light.led_count=std::max<uint16_t>(1,std::min<uint16_t>(8,led_capacity_()));
-      if(valid_light(saved_light)) save_illumination_(saved_light);
+    auto counted=global_preferences->make_preference<LegacyCountedIlluminationSettings>(0x7a32b906);
+    LegacyCountedIlluminationSettings prior;
+    if(counted.load(&prior) && prior.version==2) {
+      saved_light.enabled=prior.enabled;saved_light.brightness=prior.brightness;saved_light.settle_ms=prior.settle_ms;saved_light.led_count=prior.led_count;
+      if(valid_light(saved_light))save_illumination_(saved_light);
+    }else{
+      auto legacy=global_preferences->make_preference<LegacyIlluminationSettings>(0x7a32b904);
+      LegacyIlluminationSettings old;
+      if(legacy.load(&old) && old.version==1) {
+        saved_light.enabled=old.enabled;saved_light.brightness=old.brightness;saved_light.settle_ms=old.settle_ms;
+        saved_light.led_count=std::max<uint16_t>(1,std::min<uint16_t>(8,led_capacity_()));
+        if(valid_light(saved_light))save_illumination_(saved_light);
+      }
     }
   }
   illumination_settings_.led_count=std::max<uint16_t>(1,std::min<uint16_t>(illumination_settings_.led_count,led_capacity_()));
@@ -284,7 +292,7 @@ bool MeterSetup::accepts_reader_frame_() {
 void MeterSetup::set_illumination_(bool on,const IlluminationSettings &settings) {
   if(!illumination_) return;
   auto call=illumination_->make_call();
-  illumination_led_count_=settings.led_count;
+  illumination_led_count_=settings.led_count;illumination_led_mask_=settings.led_mask;
   call.set_save(false).set_state(on);
   // An explicit transition conflicts with an effect, even at zero milliseconds.
   // Turning off without an explicit effect lets LightCall stop the active effect.
@@ -566,6 +574,7 @@ std::string MeterSetup::status_() {
   out+=",\"autofocus_error\":";out+=std::to_string(autofocus_.error());
   out+=",\"illumination_available\":";out+=illumination_?"true":"false";
   out+=",\"illumination_led_count\":";out+=std::to_string(illumination_settings_.led_count);
+  out+=",\"illumination_led_mask\":\"";out+=format_led_mask(illumination_settings_.led_mask);out+='"';
   out+=",\"illumination_led_capacity\":";out+=std::to_string(led_capacity_());
   out+=",\"illumination_enabled\":";out+=illumination_settings_.enabled?"true":"false";
   out+=",\"illumination_brightness\":";out+=std::to_string(illumination_settings_.brightness);
@@ -731,6 +740,7 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
       };
       uint32_t enabled,brightness,settle,count;
       if(!number("enabled",enabled)||enabled>1||!number("brightness",brightness)||brightness<1||brightness>100||!number("settle_ms",settle)||settle>5000||!number("led_count",count)||count<1||count>led_capacity_()) {r->send(400,"text/plain; charset=utf-8","Helligkeit 1–100 Prozent, Vorlauf 0–5000 ms; LED-Anzahl innerhalb der reservierten Kapazität");return;}
+      if(r->hasParam("led_mask")&&!parse_led_mask(r->getParam("led_mask")->value(),candidate.led_mask)){r->send(400,"text/plain; charset=utf-8","LED-Auswahl ungültig");return;}
       candidate.enabled=enabled;candidate.brightness=brightness;candidate.settle_ms=settle;candidate.led_count=count;
     }
     pending_illumination_=candidate;

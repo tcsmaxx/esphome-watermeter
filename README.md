@@ -18,7 +18,7 @@ Die eigene Komponente **`meter_setup`** ergänzt diese Grundlage um eine abgesti
 | Speicherung | ESPHome-Präferenzen | Dauerhafte Speicherung von Rahmen, Stand, Intervall, Grenzwerten, Referenzen und Beleuchtung |
 | Bildgeometrie | Bildverarbeitung und konfigurierbare Rotation | Bilddrehung direkt in der Einrichtung sowie optionale automatische Ausrichtung anhand zweier gespeicherter Referenzmuster |
 | Plausibilitätsprüfung | Das Basisprojekt bietet unter anderem `value_validator` | Eigene Annahmelogik mit Ganzzahl-Rohwerten, Konfidenzprüfung, Rückwärts- und Sprungkontrolle |
-| Beleuchtung | Das Basisprojekt bietet unter anderem `flash_light_controller` | SK6812-RGBW-Steuerung mit LED-Anzahl, Weiß-Helligkeit, Vorlauf und zeitlich begrenztem Lichttest im Setup |
+| Beleuchtung | Das Basisprojekt bietet unter anderem `flash_light_controller` | SK6812-RGBW-Steuerung mit LED-Anzahl, Einzelauswahl, Weiß-Helligkeit, Vorlauf und zeitlich begrenztem Lichttest im Setup |
 | Home Assistant | ESPHome-API und Kamera | Bestätigter Stand, Änderung, Durchfluss, deutscher Zeitstempel, Status und Fehlermeldungen |
 
 Der Schwerpunkt liegt auf komfortabler Einrichtung und kontrollierter Veröffentlichung der Messwerte. Das Erkennungsmodell bleibt das Modell der KI-Basis; die Erweiterung ist kein neu trainiertes oder grundsätzlich genaueres OCR-Modell.
@@ -139,19 +139,23 @@ Für die Vorschau wird das korrigierte RGB-Bild im PSRAM gehalten (rund 0,9 MiB)
 
 ## SK6812-RGBW-Beleuchtung
 
-Die Beispielkonfiguration verwendet den weißen Kanal von SK6812-RGBW-LEDs. Sie reserviert mit `num_leds: 64` Platz für bis zu 64 LEDs. Die tatsächlich verwendete Anzahl wird unter **Beleuchtung** im Setup eingestellt; nur diese LEDs leuchten, alle übrigen Datenplätze bleiben ausgeschaltet.
+Die Beispielkonfiguration verwendet den weißen Kanal von SK6812-RGBW-LEDs. Sie reserviert mit `num_leds: 64` Platz für bis zu 64 LEDs. Die tatsächlich verwendete Anzahl wird unter **Beleuchtung** im Setup eingestellt; innerhalb dieser Anzahl lassen sich die LEDs einzeln auswählen. Nicht ausgewählte LEDs und alle übrigen Datenplätze bleiben ausgeschaltet.
 
 | Einstellung | Bedeutung |
 | --- | --- |
 | Automatisch bei Aufnahmen einschalten | Beleuchtung für Schnappschüsse, Tests und regelmäßige Ablesungen verwenden |
-| Anzahl LEDs | Anzahl der beleuchteten LEDs, 1 bis zur YAML-Kapazität, maximal 64 |
+| Anzahl LEDs | Anzahl der angeschlossenen LEDs, 1 bis zur YAML-Kapazität, maximal 64 |
+| LEDs auswählen | Nummerierte Schalter wählen die LEDs für Aufnahmen und Lichttests; LED 1 sitzt am Datenanschluss |
+| Alle auswählen / Keine auswählen | Alle angezeigten LEDs gemeinsam auswählen oder abwählen |
 | Weiß-Helligkeit | Helligkeit des weißen Kanals, 1–100 % |
 | Vorlauf | Zeit zur Anpassung von Belichtung und Weißabgleich, 0–5000 ms |
 | Licht testen | Beleuchtung zum Einstellen einschalten; endet spätestens nach zwei Minuten |
 | Licht aus | Laufenden Lichttest beenden |
 | Alle Einstellungen speichern | Rahmen, Referenzen, Fokus, Beleuchtung, Stromsparen und Ableseeinstellungen gemeinsam dauerhaft sichern |
 
-Während des Lichttests wartet die automatische Ablesung. Der Helligkeitsregler wirkt im aktiven Test direkt. Mit **Neues Bild** lässt sich die Beleuchtung beurteilen. Bei automatischen Aufnahmen wird der Vorlauf abgewartet, ein gepuffertes Bild verworfen und ein neues Bild zur Verarbeitung angefordert. Nach Schnappschuss oder KI-Ergebnis wird das Licht ausgeschaltet. Ein aktiver Lichttest bleibt bis zum Ausschalten oder Ablauf bestehen.
+Während des Lichttests wartet die automatische Ablesung. Der Helligkeitsregler und die LED-Auswahl wirken im aktiven Test direkt. Ohne laufenden Lichttest verändert die Auswahl nur den Entwurf. Einzelne LEDs lassen sich über **Keine auswählen** und anschließend den gewünschten Nummernschalter gezielt testen. Mit **Neues Bild** lässt sich die Beleuchtung beurteilen. Bei automatischen Aufnahmen wird der Vorlauf abgewartet, ein gepuffertes Bild verworfen und ein neues Bild zur Verarbeitung angefordert. Nach Schnappschuss oder KI-Ergebnis wird das Licht ausgeschaltet. Ein aktiver Lichttest bleibt bis zum Ausschalten oder Ablauf bestehen.
+
+Die LED-Auswahl wird mit **Alles speichern** dauerhaft übernommen und ist Teil von Export und Import. Ältere Konfigurationen und Sicherungen verwenden alle LEDs innerhalb der eingestellten Anzahl. Eine verringerte Anzahl blendet die übrigen Schalter aus und schaltet deren LEDs ab; ihre Auswahl bleibt für eine spätere Vergrößerung erhalten. Nach Änderungen der Beleuchtung Erkennung und Referenzen prüfen. In `/meter/status` steht die gespeicherte Auswahl als `illumination_led_mask`, ein Hexadezimalstring mit 16 Stellen für bis zu 64 LEDs.
 
 Die Hardwareanbindung erfolgt in YAML:
 
@@ -261,7 +265,7 @@ Im Setup bietet **Fokus** zwei Modi. Der Text unter der Auswahl beschreibt nur d
 
 Beide **Neues Bild**-Knöpfe (Fokusbereich und Kamerabild) haben dieselbe Funktion. Sie testen die gerade gewählten Fokus- und Beleuchtungseinstellungen. Der Start des Debug-Livebilds verwendet ebenfalls die aktuelle Auswahl. Tests speichern keine Einstellungen dauerhaft und pausieren die automatische Ablesung. Die Anzeige **Letzte Ausführung** beschreibt den letzten abgeschlossenen Fokuslauf, nicht die aktuelle Auswahl.
 
-**Speichern** übernimmt alle Bereiche gemeinsam: Ziffernrahmen, Referenzen, Fokusmodus und Fokuswert, LED-Anzahl und Helligkeit, Lichtvorlauf, Stromsparoptionen, Ableseintervall und Schutzgrenzen. Der feste Speicherbereich unten zeigt **Ungespeicherte Änderungen**, den laufenden Speichervorgang oder **Gespeichert**. Erst nach erfolgreicher Speicherung wird die Bestätigung angezeigt; bei einem Fehler werden die bisherigen Werte wiederhergestellt. Zum Speichern das Livebild beenden. Falls die Automatik pausiert ist, danach **Fortsetzen** wählen.
+**Speichern** übernimmt alle Bereiche gemeinsam: Ziffernrahmen, Referenzen, Fokusmodus und Fokuswert, LED-Anzahl, Einzelauswahl und Helligkeit, Lichtvorlauf, Stromsparoptionen, Ableseintervall und Schutzgrenzen. Der feste Speicherbereich unten zeigt **Ungespeicherte Änderungen**, den laufenden Speichervorgang oder **Gespeichert**. Erst nach erfolgreicher Speicherung wird die Bestätigung angezeigt; bei einem Fehler werden die bisherigen Werte wiederhergestellt. Zum Speichern das Livebild beenden. Falls die Automatik pausiert ist, danach **Fortsetzen** wählen.
 
 Unfertige Ziffernrahmen können als Entwurf gespeichert und nach einem Neustart weiterbearbeitet werden. Eine Ablesung wird erst mit vollständigen Rahmen und einem eingetragenen Zählerstand freigegeben. Ein nicht bearbeitetes Zählerstandsfeld überschreibt beim gemeinsamen Speichern nicht den inzwischen weitergelaufenen Stand.
 
@@ -350,6 +354,9 @@ python tests/alignment_flow.py
 python tests/persistence.py
 python tests/illumination_flow.py
 python tests/led_count_effect.py
+python tests/led_selection_requests.py
+g++ -std=c++17 tests/led_selection.cpp -o /tmp/meter-led-selection && /tmp/meter-led-selection
+node tests/led_selection_ui.cjs
 python tests/recovery_flow.py
 python tests/features_flow.py
 

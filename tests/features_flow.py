@@ -46,7 +46,7 @@ struct Client{bool connected=true,success=true;Discovery discovery;Availability 
 }client;Client *global_mqtt_client=&client;
 }
 struct AppType{std::string get_name(){return "test";}std::string get_friendly_name(){return "Wasserzähler";}}App;
-'''+f'#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+structs+r'''
+'''+f'#include "{root / "components/meter_setup/led_selection.h"}"\n#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+structs+r'''
 std::string zones(const Settings&){return "saved zones";}
 struct Pref {bool fail_next=false;std::vector<uint8_t> data;template<class T>bool save(T*p){if(fail_next){fail_next=false;return false;}auto b=reinterpret_cast<uint8_t*>(p);data.assign(b,b+sizeof(T));return true;}};
 struct Globals{bool sync(){return true;}}globals;Globals *global_preferences=&globals;
@@ -80,11 +80,11 @@ public:
 };
 '''+validation+methods+all_save+r'''
 int main(){
- MeterSetup original;original.settings_.calibrated=1;original.settings_.rotation_tenths=-123;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.illumination_settings_.led_count=6;
+ MeterSetup original;original.settings_.calibrated=1;original.settings_.rotation_tenths=-123;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.illumination_settings_.led_count=6;original.illumination_settings_.led_mask=0x8000000000000025ULL;
  for(int i=0;i<8;i++){auto &b=original.settings_.boxes[i];b[0]=20+i*50;b[1]=100;b[2]=b[0]+30;b[3]=150;}
  original.alignment_.enabled=original.alignment_.ready=1;uint16_t regions[2][4]={{100,200,132,232},{450,200,482,232}};memcpy(original.alignment_.regions,regions,sizeof(regions));for(auto &row:original.alignment_.pixels)for(int i=0;i<256;i++)row[i]=i%2?20:200;
  original.build_export_();assert(original.export_json_.size()<3000);assert(original.export_json_.find("password")==std::string::npos);
- MeterSetup restored;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.settings_.baseline==1864266&&restored.runtime_.warning_after==600&&restored.illumination_settings_.led_count==6&&restored.paused_&&restored.config_revision_==1&&!restored.autofocus_settings_.before_reading);
+ MeterSetup restored;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.settings_.baseline==1864266&&restored.runtime_.warning_after==600&&restored.illumination_settings_.led_mask==0x8000000000000025ULL&&restored.illumination_settings_.led_count==6&&restored.paused_&&restored.config_revision_==1&&!restored.autofocus_settings_.before_reading);
  assert(restored.settings_.rotation_tenths==-123&&restored.alignment_.rotation_tenths==-123);
  assert(memcmp(restored.alignment_.pixels,original.alignment_.pixels,sizeof(original.alignment_.pixels))==0&&restored.reader.zones.find("[20,100,50,150]")!=std::string::npos);
  auto corrupt=[&](const char *field,auto value){JsonDocument d;deserializeJson(d,original.export_json_);d[field]=value;std::string data;serializeJson(d,data);restored.pending_import_=data;restored.import_config_();assert(restored.config_revision_==1&&restored.settings_.baseline==1864266&&restored.message_.find("abgelehnt")!=std::string::npos);};
@@ -122,6 +122,8 @@ int main(){
   std::string log="Result: VALID (Raw: "+std::string(count,'2')+", Conf: 0.99, [";for(int i=0;i<count;i++){if(i)log+=", ";log+="0.99";}log+="])";meter.capture_digit_log_("meter_reader_tflite",log.data(),log.size());assert(meter.confidence_digits_==std::string(count,'2')&&meter.digit_confidences_[count-1]==99.f);
  }
  JsonDocument old_count;deserializeJson(old_count,original.export_json_);old_count["settings"].remove("digit_count");MeterSetup old_layout;serializeJson(old_count,old_layout.pending_import_);old_layout.import_config_();assert(old_layout.config_revision_==1&&old_layout.settings_.digit_count==8);
+ JsonDocument old_light;deserializeJson(old_light,original.export_json_);old_light["illumination"].remove("led_mask");MeterSetup old_leds;serializeJson(old_light,old_leds.pending_import_);old_leds.import_config_();assert(old_leds.config_revision_==1&&old_leds.illumination_settings_.led_mask==UINT64_MAX);
+ JsonDocument bad_light;deserializeJson(bad_light,original.export_json_);bad_light["illumination"]["led_mask"]="ffffffffffffffff0";MeterSetup bad_leds;serializeJson(bad_light,bad_leds.pending_import_);bad_leds.import_config_();assert(bad_leds.config_revision_==0);bad_light["illumination"]["led_mask"]=123;serializeJson(bad_light,bad_leds.pending_import_);bad_leds.import_config_();assert(bad_leds.config_revision_==0);
  mqtt::client.messages.clear();MeterSetup fewer;fewer.settings_.digit_count=6;for(int i=0;i<20;i++)fewer.mqtt_loop_();int removed=0;for(const auto &m:mqtt::client.messages)if(m.payload.empty()){assert(m.retain);++removed;}assert(removed==3&&fewer.mqtt_discovered_);
  mqtt::client.messages.clear();MeterSetup more;more.settings_.digit_count=9;for(int i=0;i<20;i++)more.mqtt_loop_();for(const auto &m:mqtt::client.messages)assert(!m.payload.empty());
  MeterSetup resized;resized.settings_.baseline=1864266;resized.settings_.calibrated=1;resized.pending_=resized.settings_;resized.pending_.digit_count=7;resized.pending_.baseline=123456;resized.pending_warning_after_=300;resized.pending_illumination_=resized.illumination_settings_;resized.digits_="01864266";resized.confidence.state=99;resized.have_previous_reading_=true;assert(resized.save_all_()&&resized.digits_.empty()&&!resized.have_previous_reading_&&std::isnan(resized.confidence.state));
