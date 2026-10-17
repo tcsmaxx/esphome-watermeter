@@ -46,7 +46,7 @@ struct Client{bool connected=true,success=true;Discovery discovery;Availability 
 }client;Client *global_mqtt_client=&client;
 }
 struct AppType{std::string get_name(){return "test";}std::string get_friendly_name(){return "Wasserzähler";}}App;
-'''+f'#include "{root / "components/meter_setup/led_selection.h"}"\n#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+structs+r'''
+'''+f'#include "{root / "components/meter_setup/image_settings.h"}"\n#include "{root / "components/meter_setup/led_selection.h"}"\n#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+structs+r'''
 std::string zones(const Settings&){return "saved zones";}
 struct Pref {bool fail_next=false;std::vector<uint8_t> data;template<class T>bool save(T*p){if(fail_next){fail_next=false;return false;}auto b=reinterpret_cast<uint8_t*>(p);data.assign(b,b+sizeof(T));return true;}};
 struct Globals{bool sync(){return true;}}globals;Globals *global_preferences=&globals;
@@ -68,6 +68,7 @@ public:
  struct Power{bool standby=true,weak=false;bool standby_enabled(){return standby;}bool weak_drive(){return weak;}bool configure(bool s,bool w){standby=s;weak=w;return true;}}camera_power_;
  uint32_t save_attempt_=0;bool save_ok_=false,pending_autofocus_=true,pending_manual_focus_=false,pending_standby_=true,pending_weak_drive_=false;uint16_t pending_focus_position_=512;bool save_all_();
  AutofocusSettings autofocus_settings_{};Pref autofocus_preference_;
+ ImageSettings image_settings_{},pending_image_{};Pref image_preference_;
  Pref illumination_preference_,runtime_preference_;Configuration saved{};
  uint16_t led_capacity_()const{return 64;}bool save_configuration_(const Settings &s,const AlignmentReference&a,bool){saved.settings=s;saved.alignment=a;return true;}
  void set_illumination_(bool,const IlluminationSettings&){}
@@ -80,11 +81,11 @@ public:
 };
 '''+validation+methods+all_save+r'''
 int main(){
- MeterSetup original;original.settings_.calibrated=1;original.settings_.rotation_tenths=-123;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.illumination_settings_.led_count=6;original.illumination_settings_.led_mask=0x8000000000000025ULL;
+ MeterSetup original;original.settings_.calibrated=1;original.settings_.rotation_tenths=-123;original.settings_.baseline=1864266;original.runtime_.warning_after=600;original.autofocus_settings_.before_reading=0;original.image_settings_.exposure=-1;original.image_settings_.contrast=1;original.image_settings_.saturation=-1;original.image_settings_.white_balance=3;original.illumination_settings_.led_count=6;original.illumination_settings_.led_mask=0x8000000000000025ULL;
  for(int i=0;i<8;i++){auto &b=original.settings_.boxes[i];b[0]=20+i*50;b[1]=100;b[2]=b[0]+30;b[3]=150;}
  original.alignment_.enabled=original.alignment_.ready=1;uint16_t regions[2][4]={{100,200,132,232},{450,200,482,232}};memcpy(original.alignment_.regions,regions,sizeof(regions));for(auto &row:original.alignment_.pixels)for(int i=0;i<256;i++)row[i]=i%2?20:200;
  original.build_export_();assert(original.export_json_.size()<3000);assert(original.export_json_.find("password")==std::string::npos);
- MeterSetup restored;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.settings_.baseline==1864266&&restored.runtime_.warning_after==600&&restored.illumination_settings_.led_mask==0x8000000000000025ULL&&restored.illumination_settings_.led_count==6&&restored.paused_&&restored.config_revision_==1&&!restored.autofocus_settings_.before_reading);
+ MeterSetup restored;restored.pending_import_=original.export_json_;restored.import_config_();assert(restored.image_settings_==original.image_settings_&&restored.settings_.baseline==1864266&&restored.runtime_.warning_after==600&&restored.illumination_settings_.led_mask==0x8000000000000025ULL&&restored.illumination_settings_.led_count==6&&restored.paused_&&restored.config_revision_==1&&!restored.autofocus_settings_.before_reading);
  assert(restored.settings_.rotation_tenths==-123&&restored.alignment_.rotation_tenths==-123);
  assert(memcmp(restored.alignment_.pixels,original.alignment_.pixels,sizeof(original.alignment_.pixels))==0&&restored.reader.zones.find("[20,100,50,150]")!=std::string::npos);
  auto corrupt=[&](const char *field,auto value){JsonDocument d;deserializeJson(d,original.export_json_);d[field]=value;std::string data;serializeJson(d,data);restored.pending_import_=data;restored.import_config_();assert(restored.config_revision_==1&&restored.settings_.baseline==1864266&&restored.message_.find("abgelehnt")!=std::string::npos);};
@@ -113,6 +114,7 @@ int main(){
  JsonDocument invalid_manual;deserializeJson(invalid_manual,original.export_json_);invalid_manual["manual_focus_position"]=1024;MeterSetup rejected_manual;serializeJson(invalid_manual,rejected_manual.pending_import_);rejected_manual.import_config_();assert(rejected_manual.config_revision_==0);
  MeterSetup combined;combined.settings_=original.settings_;combined.pending_=combined.settings_;combined.pending_.interval=180;combined.pending_alignment_=original.alignment_;combined.pending_illumination_=original.illumination_settings_;combined.pending_illumination_.brightness=37;combined.pending_warning_after_=720;combined.pending_autofocus_=false;combined.pending_manual_focus_=true;combined.pending_focus_position_=339;combined.pending_standby_=false;combined.have_previous_reading_=true;combined.runtime_.last_valid_epoch=1700000000;assert(combined.save_all_()&&combined.save_ok_&&combined.save_attempt_==1&&combined.settings_.interval==180&&combined.autofocus_settings_.position==339&&combined.illumination_settings_.brightness==37&&combined.runtime_.warning_after==720&&!combined.camera_power_.standby_enabled());assert(combined.have_previous_reading_&&combined.runtime_.last_valid_epoch==1700000000);
  combined.pending_.interval=240;combined.pending_focus_position_=400;combined.autofocus_preference_.fail_next=true;assert(!combined.save_all_()&&!combined.save_ok_&&combined.save_attempt_==2&&combined.settings_.interval==180&&combined.autofocus_settings_.position==339&&combined.saved.settings.interval==180);assert(combined.message_.find("Fokuseinstellungen")!=std::string::npos);
+ combined.image_preference_.fail_next=true;assert(!combined.save_all_()&&!combined.save_ok_&&combined.message_.find("Bildeinstellungen")!=std::string::npos);
  combined.illumination_preference_.fail_next=true;assert(!combined.save_all_()&&!combined.save_ok_&&combined.message_.find("Beleuchtung")!=std::string::npos&&combined.settings_.interval==180);
  for(int count=1;count<=9;count++){
   MeterSetup meter;meter.settings_.digit_count=count;meter.settings_.decimals=0;meter.settings_.baseline=maximum_reading(count);meter.settings_.calibrated=1;
@@ -124,6 +126,8 @@ int main(){
  JsonDocument old_count;deserializeJson(old_count,original.export_json_);old_count["settings"].remove("digit_count");MeterSetup old_layout;serializeJson(old_count,old_layout.pending_import_);old_layout.import_config_();assert(old_layout.config_revision_==1&&old_layout.settings_.digit_count==8);
  JsonDocument old_light;deserializeJson(old_light,original.export_json_);old_light["illumination"].remove("led_mask");MeterSetup old_leds;serializeJson(old_light,old_leds.pending_import_);old_leds.import_config_();assert(old_leds.config_revision_==1&&old_leds.illumination_settings_.led_mask==UINT64_MAX);
  JsonDocument bad_light;deserializeJson(bad_light,original.export_json_);bad_light["illumination"]["led_mask"]="ffffffffffffffff0";MeterSetup bad_leds;serializeJson(bad_light,bad_leds.pending_import_);bad_leds.import_config_();assert(bad_leds.config_revision_==0);bad_light["illumination"]["led_mask"]=123;serializeJson(bad_light,bad_leds.pending_import_);bad_leds.import_config_();assert(bad_leds.config_revision_==0);
+ JsonDocument bad_image;deserializeJson(bad_image,original.export_json_);bad_image["image"]["exposure"]=256;MeterSetup invalid_image;serializeJson(bad_image,invalid_image.pending_import_);invalid_image.import_config_();assert(invalid_image.config_revision_==0);
+ JsonDocument old_image;deserializeJson(old_image,original.export_json_);old_image.remove("image");MeterSetup legacy_image;legacy_image.image_settings_.contrast=2;serializeJson(old_image,legacy_image.pending_import_);legacy_image.import_config_();assert(legacy_image.config_revision_==1&&legacy_image.image_settings_.contrast==2);
  mqtt::client.messages.clear();MeterSetup fewer;fewer.settings_.digit_count=6;for(int i=0;i<20;i++)fewer.mqtt_loop_();int removed=0;for(const auto &m:mqtt::client.messages)if(m.payload.empty()){assert(m.retain);++removed;}assert(removed==3&&fewer.mqtt_discovered_);
  mqtt::client.messages.clear();MeterSetup more;more.settings_.digit_count=9;for(int i=0;i<20;i++)more.mqtt_loop_();for(const auto &m:mqtt::client.messages)assert(!m.payload.empty());
  MeterSetup resized;resized.settings_.baseline=1864266;resized.settings_.calibrated=1;resized.pending_=resized.settings_;resized.pending_.digit_count=7;resized.pending_.baseline=123456;resized.pending_warning_after_=300;resized.pending_illumination_=resized.illumination_settings_;resized.digits_="01864266";resized.confidence.state=99;resized.have_previous_reading_=true;assert(resized.save_all_()&&resized.digits_.empty()&&!resized.have_previous_reading_&&std::isnan(resized.confidence.state));

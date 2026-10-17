@@ -3,6 +3,18 @@
 #include <cstring>
 #include "esphome/core/log.h"
 namespace esphome::meter_setup {
+bool MeterSetup::parse_image_options_(AsyncWebServerRequest *r){
+  ImageSettings candidate=image_settings_;
+  const bool any=r->hasParam("image_exposure")||r->hasParam("image_contrast")||r->hasParam("image_saturation")||r->hasParam("image_white_balance");
+  if(any){
+    if(!r->hasParam("image_exposure")||!r->hasParam("image_contrast")||!r->hasParam("image_saturation")||!r->hasParam("image_white_balance")||
+       !parse_image_adjustment(r->getParam("image_exposure")->value(),candidate.exposure)||!parse_image_adjustment(r->getParam("image_contrast")->value(),candidate.contrast)||!parse_image_adjustment(r->getParam("image_saturation")->value(),candidate.saturation)){
+      r->send(400,"text/plain; charset=utf-8","Bildeinstellungen: Belichtung, Kontrast und Sättigung jeweils −2 bis +2");return false;
+    }
+    const auto wb=r->getParam("image_white_balance")->value();if(wb.size()!=1||wb[0]<'0'||wb[0]>'4'){r->send(400,"text/plain; charset=utf-8","Weißabgleich ungültig");return false;}candidate.white_balance=wb[0]-'0';
+  }
+  pending_image_=candidate;return true;
+}
 bool MeterSetup::parse_options_(AsyncWebServerRequest *r,bool power) {
   auto number=[r](const char *key,uint32_t lo,uint32_t hi,uint32_t &out){
     if(!r->hasParam(key))return false;
@@ -19,6 +31,7 @@ bool MeterSetup::parse_options_(AsyncWebServerRequest *r,bool power) {
   }
   uint64_t mask=illumination_settings_.led_mask;
   if(r->hasParam("led_mask")&&!parse_led_mask(r->getParam("led_mask")->value(),mask)){r->send(400,"text/plain; charset=utf-8","LED-Auswahl ungültig");return false;}
+  if(!parse_image_options_(r))return false;
   pending_manual_focus_=r->getParam("focus_mode")->value()=="manual";
   pending_autofocus_=!pending_manual_focus_;pending_focus_position_=position;
   pending_illumination_=illumination_settings_;pending_illumination_.enabled=enabled;pending_illumination_.led_count=count;
@@ -36,19 +49,20 @@ bool MeterSetup::save_all_() {
   const char *failure=nullptr;
   if(!save_configuration_(pending_,pending_alignment_,false))failure="Rahmen, Drehung und Referenzen";
   else if(!illumination_preference_.save(&pending_illumination_))failure="Beleuchtung";
+  else if(!image_preference_.save(&pending_image_))failure="Bildeinstellungen";
   else if(!runtime_preference_.save(&options))failure="Ableseeinstellungen";
   else if(!autofocus_preference_.save(&focus))failure="Fokuseinstellungen";
   else if(!camera_power_.configure(pending_standby_,pending_weak_drive_))failure="Stromspareinstellungen / Flash-Synchronisierung";
   else if(!global_preferences->sync())failure="Flash-Synchronisierung";
   if(failure){
     save_configuration_(settings_,alignment_,false);illumination_preference_.save(&illumination_settings_);
-    runtime_preference_.save(&runtime_);autofocus_preference_.save(&autofocus_settings_);
+    image_preference_.save(&image_settings_);runtime_preference_.save(&runtime_);autofocus_preference_.save(&autofocus_settings_);
     camera_power_.configure(old_standby,old_weak);global_preferences->sync();
     message_=std::string("Speichern fehlgeschlagen: ")+failure+" · Änderungen bleiben ungespeichert";
     ESP_LOGE("meter_setup","%s",message_.c_str());return false;
   }
   settings_=pending_;alignment_=draft_alignment_=pending_alignment_;runtime_=options;autofocus_settings_=focus;
-  illumination_settings_=pending_illumination_;
+  illumination_settings_=pending_illumination_;image_settings_=pending_image_;
   if(layout_changed){if(confidence_sensor_)confidence_sensor_->publish_state(NAN);for(int i=0;i<MAX_DIGITS;i++)if(digit_sensors_[i])digit_sensors_[i]->publish_state(NAN);digits_.clear();confidence_digits_.clear();confidence_=0;for(auto &value:digit_confidences_)value=NAN;preview_.reset();preview_size_=0;inference_jpeg_.reset();inference_jpeg_size_=0;}
 
   if(baseline_changed){have_previous_reading_=false;runtime_.last_valid_epoch=0;if(change_)change_->publish_state(NAN);if(flow_)flow_->publish_state(NAN);}

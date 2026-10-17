@@ -7,6 +7,7 @@
 #include "autofocus.h"
 #include "alignment.h"
 #include "led_selection.h"
+#include "image_settings.h"
 #include "esphome/components/light/addressable_light_effect.h"
 #include "esp_heap_caps.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -127,6 +128,15 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   void autofocus_loop_();
   void autofocus_failed_(const char *reason);
   CameraPowerController camera_power_;
+  bool image_controls_available_() const;
+  void image_setup_();
+  bool prepare_image_settings_();
+  bool parse_image_options_(AsyncWebServerRequest *request);
+  ImageSettings image_settings_{},pending_image_{},active_image_{},applied_image_{};
+  ESPPreferenceObject image_preference_;
+  bool image_applied_{false};
+  uint32_t image_power_generation_{UINT32_MAX},image_settle_until_{0};
+  std::string image_status_{"Noch nicht bereit"};
   uint32_t autofocus_power_generation_{UINT32_MAX};
   bool pending_standby_{true},pending_weak_drive_{false};
   AutofocusController autofocus_;

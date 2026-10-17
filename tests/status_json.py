@@ -21,9 +21,10 @@ source = r'''
 #define ESPHOME_LOOP_TASK_STACK_SIZE 32768
 uint32_t millis(){return 100;}
 unsigned uxTaskGetStackHighWaterMark(void *) { return 24000; }
-'''+f'#include "{root / "components/meter_setup/led_selection.h"}"\n#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+settings+quote+zones+r'''
+'''+f'#include "{root / "components/meter_setup/image_settings.h"}"\n#include "{root / "components/meter_setup/led_selection.h"}"\n#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+settings+quote+zones+r'''
 class MeterSetup {
  public:
+ ImageSettings image_settings_{};std::string image_status_="Bereit";bool image_controls_available_()const{return true;}
  uint8_t result_decimals_=3;
  Settings settings_{}; AlignmentReference alignment_{},draft_alignment_{}; uint32_t reference_revision_=0,alignment_ms_=0;std::string alignment_result_="Ausgeschaltet";
  bool busy_=false,paused_=true,capture_pending_=false,illumination_on_=false,light_test_=false;void *illumination_=nullptr;IlluminationSettings illumination_settings_{};
@@ -58,6 +59,8 @@ with tempfile.TemporaryDirectory(prefix="meter-status-test-") as directory:
  assert [row["confidence"] for row in rows] == [73.4, 0, 0]
  assert rows[0]["message"] == 'Test "ok"'
  assert rows[0]["digits"] == "00123456"
+ assert rows[0]["image_controls_available"] is True
+ assert rows[0]["image_exposure"] == 0
  assert rows[0]["illumination_led_mask"] == "ffffffffffffffff"
  assert rows[0]["loop_stack_size"] == 32768
  assert rows[0]["loop_stack_free"] == 24000

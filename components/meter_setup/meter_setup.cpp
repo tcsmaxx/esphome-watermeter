@@ -234,6 +234,7 @@ void MeterSetup::setup() {
   next_=millis()+recovery_delay_ms_;
   update_status_();
   camera_power_.setup();
+  image_setup_();
   autofocus_setup_();
   features_setup_();
   server_->add_handler(this);
@@ -315,6 +316,7 @@ void MeterSetup::reset_illumination_() {
 }
 void MeterSetup::begin_capture_(bool inference) {
   camera_power_.request();
+  active_image_=(preview_active_||(inference&&test_))?pending_image_:image_settings_;
   autofocus_used_=false;
   capture_inference_=inference;capture_started_=millis();inference_started_=false;
   capture_pending_=true;flush_received_=false;
@@ -324,7 +326,7 @@ void MeterSetup::begin_capture_(bool inference) {
   if(automatic_light) {
     set_illumination_(true,lighting);
     capture_stage_=0;capture_deadline_=millis()+lighting.settle_ms;
-  } else if(camera_power_.supported()||autofocus_once_||((autofocus_settings_.before_reading||autofocus_settings_.manual_enabled||manual_focus_once_)&&autofocus_.supported())) {
+  } else if(camera_power_.supported()||image_controls_available_()||autofocus_once_||((autofocus_settings_.before_reading||autofocus_settings_.manual_enabled||manual_focus_once_)&&autofocus_.supported())) {
     capture_stage_=0;capture_deadline_=millis();
   } else {
     capture_stage_=2;
@@ -349,6 +351,7 @@ void MeterSetup::illumination_loop_() {
     next_=millis()+settings_.interval*1000;return;
   }
   if(capture_stage_==0 && int32_t(millis()-capture_deadline_)>=0 && camera_power_.ready()) {
+    if(!prepare_image_settings_())return;
     if(start_autofocus_())return;
     capture_stage_=1;camera_->request_image(camera::WEB_REQUESTER);
   } else if(capture_stage_==1 && flush_received_) {
@@ -398,7 +401,7 @@ void MeterSetup::loop() {
   }
   if(cmd==FOCUS){paused_=true;autofocus_once_=true;message_="Autofokus wird vorbereitet …";begin_capture_(false);}
   if(cmd==IMPORT && !busy_)import_config_();
-  if(cmd==RESET && !busy_) {camera_power_.configure(true,false);autofocus_settings_=AutofocusSettings{};autofocus_preference_.save(&autofocus_settings_);reset_();runtime_.last_valid_epoch=0;runtime_.warning_after=300;runtime_preference_.save(&runtime_);global_preferences->sync();build_export_();}
+  if(cmd==RESET && !busy_) {image_settings_=pending_image_=ImageSettings{};image_preference_.save(&image_settings_);camera_power_.configure(true,false);autofocus_settings_=AutofocusSettings{};autofocus_preference_.save(&autofocus_settings_);reset_();runtime_.last_valid_epoch=0;runtime_.warning_after=300;runtime_preference_.save(&runtime_);global_preferences->sync();build_export_();}
   if(cmd==REFERENCE && !busy_) capture_references_();
   if(cmd==CAPTURE) {message_="Kamerabild wird aufgenommen …";begin_capture_(false);}
   if(cmd==LIGHT_SAVE) {
@@ -562,6 +565,12 @@ std::string MeterSetup::status_() {
   out+=",\"camera_sleeping\":";out+=camera_power_.sleeping()?"true":"false";
   out+=",\"camera_weak_drive\":";out+=camera_power_.weak_drive()?"true":"false";
   out+=",\"camera_power_status\":";out+=quote(camera_power_.status());
+  out+=",\"image_controls_available\":";out+=image_controls_available_()?"true":"false";
+  out+=",\"image_exposure\":";out+=std::to_string(image_settings_.exposure);
+  out+=",\"image_contrast\":";out+=std::to_string(image_settings_.contrast);
+  out+=",\"image_saturation\":";out+=std::to_string(image_settings_.saturation);
+  out+=",\"image_white_balance\":";out+=std::to_string(image_settings_.white_balance);
+  out+=",\"image_status\":";out+=quote(image_status_);
   out+=",\"save_attempt\":";out+=std::to_string(save_attempt_);
   out+=",\"save_ok\":";out+=save_ok_?"true":"false";
   out+=",\"manual_focus_enabled\":";out+=autofocus_settings_.manual_enabled?"true":"false";
@@ -691,6 +700,7 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
     command_=PREVIEW;r->send(200,"text/plain","Neues Bild mit den gewählten Einstellungen angefordert");return;
   }
   if(url=="/meter/save_all" && !parse_options_(r,true))return;
+  if(url=="/meter/test" && !parse_image_options_(r))return;
   if(url=="/meter/power_save"){
     if(!r->hasParam("standby")||!r->hasParam("weak_drive")){r->send(400,"text/plain","standby und weak_drive erforderlich");return;}
     const auto standby=r->getParam("standby")->value(),weak=r->getParam("weak_drive")->value();

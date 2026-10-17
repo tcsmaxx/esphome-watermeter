@@ -79,6 +79,7 @@ void MeterSetup::build_export_() {
   std::string pixels;pixels.reserve(1024);for(const auto &row:alignment_.pixels)for(uint8_t b:row){pixels+=hex[b>>4];pixels+=hex[b&15];}
   export_json_=json::build_json([&](JsonObject root){
     root["format"]="esphome-watermeter";root["version"]=1;root["camera_width"]=640;root["camera_height"]=480;root["warning_after"]=runtime_.warning_after;root["autofocus_before_reading"]=bool(autofocus_settings_.before_reading);root["manual_focus_enabled"]=bool(autofocus_settings_.manual_enabled);root["manual_focus_position"]=autofocus_settings_.position;root["camera_standby"]=camera_power_.standby_enabled();root["camera_weak_drive"]=camera_power_.weak_drive();
+    auto image=root["image"].to<JsonObject>();image["exposure"]=image_settings_.exposure;image["contrast"]=image_settings_.contrast;image["saturation"]=image_settings_.saturation;image["white_balance"]=image_settings_.white_balance;
     auto s=root["settings"].to<JsonObject>();s["digit_count"]=settings_.digit_count;s["rotation_tenths"]=settings_.rotation_tenths;s["baseline"]=settings_.baseline;s["max_step"]=settings_.max_step;s["interval"]=settings_.interval;s["decimals"]=settings_.decimals;s["calibrated"]=bool(settings_.calibrated);
     auto boxes=s["boxes"].to<JsonArray>();for(int i=0;i<settings_.digit_count;i++){auto row=boxes.add<JsonArray>();for(auto v:settings_.boxes[i])row.add(v);}
     auto a=root["alignment"].to<JsonObject>();a["enabled"]=bool(alignment_.enabled);a["ready"]=bool(alignment_.ready);a["pixels"]=pixels;
@@ -87,7 +88,7 @@ void MeterSetup::build_export_() {
   });
 }
 void MeterSetup::import_config_() {
-  Settings cfg;AlignmentReference refs;IlluminationSettings light;RuntimeSettings options;auto focus=autofocus_settings_;const bool old_standby=camera_power_.standby_enabled(),old_weak=camera_power_.weak_drive();bool standby=old_standby,weak=old_weak;
+  Settings cfg;ImageSettings image=image_settings_;AlignmentReference refs;IlluminationSettings light;RuntimeSettings options;auto focus=autofocus_settings_;const bool old_standby=camera_power_.standby_enabled(),old_weak=camera_power_.weak_drive();bool standby=old_standby,weak=old_weak;
   const auto uint_value=[](JsonVariant value,uint32_t min,uint32_t max,uint32_t &out){if(!value.is<uint32_t>())return false;out=value.as<uint32_t>();return out>=min&&out<=max;};
   const bool valid=json::parse_json(pending_import_,[&](JsonObject root){
     uint32_t header_value;
@@ -101,6 +102,12 @@ void MeterSetup::import_config_() {
     }else if(!root["manual_focus_position"].isNull())return false;
     else if(!root["autofocus_before_reading"].isNull())focus.manual_enabled=0;
     if(focus.manual_enabled&&focus.before_reading)return false;
+    if(!root["image"].isNull()){
+      auto entry=root["image"];if(!entry.is<JsonObject>()||!entry["exposure"].is<int>()||!entry["contrast"].is<int>()||!entry["saturation"].is<int>()||!entry["white_balance"].is<int>())return false;
+      const int exposure=entry["exposure"],contrast=entry["contrast"],saturation=entry["saturation"],wb=entry["white_balance"];
+      if(exposure < -2||exposure>2||contrast < -2||contrast>2||saturation < -2||saturation>2||wb<0||wb>4)return false;
+      image.exposure=exposure;image.contrast=contrast;image.saturation=saturation;image.white_balance=wb;
+    }
     if(!uint_value(root["warning_after"],30,86400,options.warning_after))return false;
     auto s=root["settings"].as<JsonObject>();uint32_t v;
     if(!s["calibrated"].is<bool>()||!uint_value(s["baseline"],0,999999999,cfg.baseline)||!uint_value(s["max_step"],1,999999999,cfg.max_step)||!uint_value(s["interval"],10,86400,cfg.interval)||!uint_value(s["decimals"],0,6,v))return false;
@@ -128,9 +135,9 @@ void MeterSetup::import_config_() {
   });
   pending_import_.clear();
   if(!valid){message_="Import abgelehnt: ungültige oder inkompatible Sicherung";return;}
-  const bool saved=save_configuration_(cfg,refs,false)&&illumination_preference_.save(&light)&&runtime_preference_.save(&options)&&autofocus_preference_.save(&focus)&&camera_power_.configure(standby,weak)&&global_preferences->sync();
-  if(!saved){save_configuration_(settings_,alignment_,false);illumination_preference_.save(&illumination_settings_);runtime_preference_.save(&runtime_);autofocus_preference_.save(&autofocus_settings_);camera_power_.configure(old_standby,old_weak);global_preferences->sync();message_="Import fehlgeschlagen: Speicherung nicht möglich";return;}
-  settings_=pending_=cfg;alignment_=draft_alignment_=pending_alignment_=refs;illumination_settings_=pending_illumination_=light;runtime_=options;autofocus_settings_=focus;
+  const bool saved=save_configuration_(cfg,refs,false)&&illumination_preference_.save(&light)&&image_preference_.save(&image)&&runtime_preference_.save(&options)&&autofocus_preference_.save(&focus)&&camera_power_.configure(standby,weak)&&global_preferences->sync();
+  if(!saved){save_configuration_(settings_,alignment_,false);illumination_preference_.save(&illumination_settings_);image_preference_.save(&image_settings_);runtime_preference_.save(&runtime_);autofocus_preference_.save(&autofocus_settings_);camera_power_.configure(old_standby,old_weak);global_preferences->sync();message_="Import fehlgeschlagen: Speicherung nicht möglich";return;}
+  settings_=pending_=cfg;image_settings_=pending_image_=image;alignment_=draft_alignment_=pending_alignment_=refs;illumination_settings_=pending_illumination_=light;runtime_=options;autofocus_settings_=focus;
   paused_=true;accepted_=false;reading_problem_=false;reading_error_.clear();have_previous_reading_=false;reading_age_=NAN;stale_=false;boot_started_=millis();
   preview_.reset();inference_jpeg_.reset();preview_size_=inference_jpeg_size_=0;digits_.clear();confidence_digits_.clear();confidence_=0;
   light_test_=false;set_illumination_(false,illumination_settings_);

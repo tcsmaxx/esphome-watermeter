@@ -277,6 +277,23 @@ Die manuelle Ansteuerung verwendet die im [OV5640-Datenblatt](https://files.seee
 
 Modus und Wert sind Bestandteil von Export, Import und Zurücksetzen. Ältere Konfigurationen bleiben kompatibel; der frühere Modus ohne automatischen Fokus wird beim Laden zu **Automatisch** übernommen. `/meter/status` enthält `manual_focus_enabled`, `manual_focus_position`, `manual_focus_applied` (letzter bestätigter Zielwert oder `null`), `focus_job_manual` sowie `save_attempt` und `save_ok` für die Speicherbestätigung. Nach einem Kameratausch Ziffernrahmen prüfen und Referenzen neu aufnehmen.
 
+## Bildqualität und Reflexionen
+
+Unter **Einstellungen → Kamera & Fokus → Bildqualität** stehen die Bildparameter des Kamerasensors bereit:
+
+| Einstellung | Bereich und Wirkung |
+| --- | --- |
+| Belichtung · Automatik | −2 bis +2; negative Werte nehmen dunkler auf, die automatische Belichtung bleibt aktiv |
+| Kontrast | −2 bis +2; höhere Werte verstärken Hell-Dunkel-Unterschiede |
+| Sättigung | −2 bis +2; negative Werte reduzieren die Farbsättigung |
+| Weißabgleich | Automatisch, Sonne, bewölkt, Leuchtstofflicht oder warmes Kunstlicht |
+
+**Reflexionen reduzieren** wählt Belichtung −1, Kontrast +1, Sättigung 0 und automatischen Weißabgleich als Ausgangspunkt. **Neutral** setzt alle vier Parameter auf die Standardwerte zurück. Beide Schaltflächen ändern zunächst nur den Entwurf. **Neues Bild**, **Rahmen testen** und der Start des Livebilds verwenden die gewählten Werte; **Alles speichern** übernimmt sie dauerhaft für regelmäßige Ablesungen. Ein Testbild verändert die gespeicherten Bildparameter nicht. Zum Vergleichen einen Satz Werte wählen und anschließend ein neues Bild aufnehmen.
+
+Die Parameter werden am Sensor nach dem Aufwecken und vor dem Fokussieren gesetzt. Nach einer Änderung oder erneuten Anwendung beim Aufwecken wartet die Aufnahme zusätzlich 300 ms auf Belichtung und Weißabgleich. Ein gepuffertes Bild wird anschließend wie bisher verworfen. Unveränderte Einstellungen lösen während derselben Wachphase keine zusätzliche Wartezeit aus. Die manuelle Verstellung der Linse ohne Bild verändert die Bildparameter nicht. Schlägt ein Sensoraufruf fehl, wird die Aufnahme mit Fehlermeldung beendet; eine automatische Ablesung wird zum nächsten Intervall erneut versucht.
+
+Die Einstellung verändert die tatsächliche Kameraaufnahme und benötigt keine zusätzliche nachträgliche Bildverarbeitung. Starke Spiegelungen, die Ziffern verdecken, erfordern eine günstigere Beleuchtung oder Abschirmung. Nach Änderungen die Einzelkonfidenzen und gegebenenfalls die Ausrichtungsreferenzen prüfen. Die Bildparameter sind Teil von Export, Import und Zurücksetzen. Sicherungen ohne diesen optionalen Bereich behalten beim Import die vorhandenen Bildparameter bei. `/meter/status` zeigt die gespeicherten Werte als `image_exposure`, `image_contrast`, `image_saturation`, `image_white_balance` sowie Unterstützung und Ausführungsstatus als `image_controls_available` und `image_status`.
+
 ## MQTT und zweite Home-Assistant-Instanz
 
 MQTT ist optional und kann parallel zur ESPHome-API verwendet werden: beispielsweise ESPHome-API im Garten und MQTT in einer zweiten Home-Assistant-Instanz. Dazu in der vorhandenen Geräte-YAML ergänzen:
@@ -355,6 +372,9 @@ python tests/persistence.py
 python tests/illumination_flow.py
 python tests/led_count_effect.py
 python tests/led_selection_requests.py
+python tests/image_options.py
+python tests/image_controls_flow.py
+node tests/image_controls_ui.cjs
 g++ -std=c++17 tests/led_selection.cpp -o /tmp/meter-led-selection && /tmp/meter-led-selection
 node tests/led_selection_ui.cjs
 python tests/recovery_flow.py

@@ -23,7 +23,7 @@ source=r'''
 void *heap_caps_malloc(size_t n,int){return malloc(n);}
 void heap_caps_free(void *p){free(p);}
 uint32_t now=100;uint32_t millis(){return now;}
-'''+f'#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+settings+r'''
+'''+f'#include "{root / "components/meter_setup/image_settings.h"}"\n#include "{root / "components/meter_setup/alignment.h"}"\nusing namespace esphome::meter_setup;\n'+settings+r'''
 std::map<uint32_t,std::vector<uint8_t>> storage;
 struct ESPPreferenceObject {
  uint32_t key=0;
@@ -57,6 +57,7 @@ class MeterSetup {
  uint32_t autofocus_power_generation_=UINT32_MAX;
  AutofocusSettings autofocus_settings_{1,0};bool autofocus_once_=false,autofocus_used_=false;struct AF{bool supported(){return false;}}autofocus_;bool start_autofocus_(){return false;}void autofocus_loop_(){}
  bool live_=false,live_streaming_=false;uint32_t live_last_frame_=0,live_frame_at_=0;
+ ImageSettings image_settings_{},pending_image_{},active_image_{};bool image_controls_available_(){return false;}bool prepare_image_settings_(){return true;}
  Settings settings_;std::mutex mutex_;bool busy_=false,test_=false,reading_problem_=false;std::string message_,reading_error_;
  uint32_t next_=0,frame_=0;std::shared_ptr<uint8_t> jpeg_;size_t jpeg_size_=0;
  void load_(){
