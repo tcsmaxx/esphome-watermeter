@@ -141,6 +141,8 @@ Mit **Rahmen testen** lässt sich eine neue KI-Aufnahme erzeugen. Die KI-Ansicht
 
 Das korrigierte RGB-Bild bleibt für die Erkennung unverändert im PSRAM (rund 0,9 MiB). Für die Browseranzeige wird bei Bedarf eine kleinere JPEG-Vorschau mit Qualität 95 erzeugt und zwischengespeichert. Ohne Ausrichtung wird die gespeicherte JPEG-Aufnahme verwendet. Die Oberfläche zeigt Ladefortschritt und Übertragungsfehler an; **KI-Bild neu laden** wiederholt den Download. Fehlt eine gültige KI-Aufnahme, nennt sie den Grund und bietet **Rahmen testen** an. `/meter/status` enthält die Laufzeit des Ausrichtungsschritts als `alignment_ms`. Der Sensor **Ablesedauer** umfasst bei aktiver Ausrichtung auch diesen Schritt; die beiden Zeiten dürfen nicht addiert werden.
 
+Start und Pause erklären ihren Zustand über Tooltips, die auch bei gesperrten Buttons am umgebenden Fokusbereich erreichbar sind. Der Sperrgrund für Start erscheint zusätzlich als sichtbarer Hinweis für Touchgeräte. Fehlt bei vollständigen Rahmen noch der gespeicherte Zählerstand, öffnet **Zählerstand eingeben** direkt das Eingabefeld. Laufende Aktionen, Livebild und bereits aktive Automatik werden ebenfalls erklärt.
+
 ## SK6812-RGBW-Beleuchtung
 
 Die Beispielkonfiguration verwendet den weißen Kanal von SK6812-RGBW-LEDs. Sie reserviert mit `num_leds: 64` Platz für bis zu 64 LEDs. Die tatsächlich verwendete Anzahl wird unter **Beleuchtung** im Setup eingestellt; innerhalb dieser Anzahl lassen sich die LEDs einzeln auswählen. Nicht ausgewählte LEDs und alle übrigen Datenplätze bleiben ausgeschaltet.
