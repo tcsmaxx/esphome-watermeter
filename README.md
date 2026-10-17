@@ -51,7 +51,7 @@ Die Beispielkonfiguration lädt `meter_setup` aus diesem Repository und die KI-K
 
 ## Web-Einrichtung
 
-Der Kopfbereich zeigt den gespeicherten Zählerstand im deutschen Zahlenformat, **Start** (Play), **Pause** und **Speichern**. **Ableseoptionen** öffnet Intervall, Warnschwelle und Sprunggrenze. Der Status und das Alter der letzten gültigen Ablesung bleiben im Hauptbereich sichtbar.
+Die kompakte Kopfzeile vereint Navigation, den gespeicherten Zählerstand als grüne Siebensegmentanzeige, **Start** (Play), **Pause** und **Speichern**. Die Anzeige verwendet das deutsche Zahlenformat und benötigt keine externen Schriftarten. Ein Klick auf das angezeigte Intervall öffnet die Ableseoptionen mit Warnschwelle und Sprunggrenze. Das Alter der letzten gültigen Ablesung, Warnungen und Speicherbestätigungen bleiben sichtbar; auf dem Smartphone wird die Leiste platzsparend umgebrochen.
 
 Links stehen Ziffernrahmen und die optionale automatische Referenzausrichtung. **Rahmen fein justieren** öffnet Koordinaten und Korrekturtasten. Über **Einstellungen** sind die Bereiche **Kamera & Fokus**, **Beleuchtung**, **Ablesung** sowie **Sicherung & Diagnose** erreichbar. Änderungen aus allen Bereichen werden gemeinsam mit **Speichern** übernommen. Das Schließen des Einstellungsdialogs verwirft den Entwurf nicht.
 
