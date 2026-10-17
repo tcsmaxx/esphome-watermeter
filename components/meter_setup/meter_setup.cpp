@@ -72,7 +72,7 @@ void AlignedMeterReader::on_camera_image(const std::shared_ptr<camera::CameraIma
 }
 std::shared_ptr<camera::CameraImage> MeterSetup::align_image_(const std::shared_ptr<camera::CameraImage> &image) {
   std::lock_guard<std::mutex> lock(mutex_);
-  preview_.reset();preview_size_=0;++preview_sequence_;
+  preview_.reset();preview_size_=0;++preview_sequence_;preview_jpeg_.reset();preview_jpeg_size_=0;preview_encode_pending_=preview_encode_failed_=false;
   inference_jpeg_.reset();inference_jpeg_size_=0;
   inference_capture_epoch_=camera_capture_epoch(image);
   const auto original_size=image->get_data_length();
@@ -270,7 +270,7 @@ void MeterSetup::on_camera_image(const std::shared_ptr<camera::CameraImage> &ima
   }
 }
 void MeterSetup::reset_() {
-  preview_.reset();preview_size_=0;++preview_sequence_;
+  preview_.reset();preview_size_=0;++preview_sequence_;preview_jpeg_.reset();preview_jpeg_size_=0;preview_encode_pending_=preview_encode_failed_=false;
   Settings cleared;
   if(!save_configuration_(cleared,AlignmentReference{},true)) {
     message_="Löschen fehlgeschlagen";
@@ -402,6 +402,7 @@ void MeterSetup::loop() {
     if(autofocus_preference_.save(&autofocus_settings_)&&global_preferences->sync()){message_="Fokuseinstellung gespeichert";build_export_();}
     else {autofocus_settings_=old;autofocus_preference_.save(&old);global_preferences->sync();message_="Fokuseinstellung konnte nicht gespeichert werden";}
   }
+  if(preview_encode_pending_)prepare_preview_();
   if(cmd==SAVE_ALL)save_all_();
   if(cmd==PREVIEW){paused_=true;preview_active_=true;preview_focus_.before_reading=pending_autofocus_;preview_focus_.manual_enabled=pending_manual_focus_;preview_focus_.position=pending_focus_position_;begin_capture_(false);}
   if(cmd==FOCUS_ONLY){focus_only_=true;manual_focus_once_=true;manual_focus_position_=pending_focus_position_;if(!live_)paused_=true;begin_capture_(false);}
@@ -686,12 +687,20 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   }
   if(url=="/meter/processed" && r->method()==HTTP_GET) {
     if(!preview_) {r->send(503,"text/plain; charset=utf-8","Kein gültiges KI-Bild; Rahmen testen und Ausrichtungsstatus prüfen");return;}
-    auto image=preview_;const auto size=preview_size_;const bool rgb=preview_rgb_;
-    const auto sequence=preview_sequence_;const auto boxes=preview_boxes_,references=preview_references_;const auto decimals=preview_decimals_;
+    const bool rgb=preview_rgb_;
+    if(r->hasParam("retry")&&r->getParam("retry")->value()=="1")preview_encode_failed_=false;
+    if(rgb&&(!preview_jpeg_||preview_jpeg_sequence_!=preview_sequence_)){
+      if(preview_encode_failed_&&preview_jpeg_sequence_==preview_sequence_){r->send(500,"text/plain; charset=utf-8","KI-Vorschau konnte nicht vorbereitet werden (Bildspeicher/Codec). Neues KI-Bild mit Rahmen testen erzeugen.");return;}
+      preview_encode_pending_=true;
+      auto *response=r->beginResponse(409,"text/plain; charset=utf-8","KI-Bild wird für die Anzeige vorbereitet");response->addHeader("X-Meter-Preview-State","preparing");response->addHeader("Cache-Control","no-store");r->send(response);return;
+    }
+    auto image=rgb?preview_jpeg_:preview_;const auto size=rgb?preview_jpeg_size_:preview_size_;
+    const auto boxes=preview_boxes_,references=preview_references_;
+    const auto sequence=std::to_string(preview_sequence_),decimals=std::to_string(preview_decimals_);
     guard.unlock();
-    auto *response=r->beginResponse(200,rgb?"application/octet-stream":"image/jpeg",image.get(),size);
-    response->addHeader("Cache-Control","no-store");response->addHeader("X-Meter-Image",std::to_string(sequence).c_str());
-    response->addHeader("X-Meter-Boxes",boxes.c_str());response->addHeader("X-Meter-References",references.c_str());response->addHeader("X-Meter-Decimals",std::to_string(decimals).c_str());
+    auto *response=r->beginResponse(200,"image/jpeg",image.get(),size);
+    response->addHeader("Cache-Control","no-store");response->addHeader("X-Meter-Image",sequence.c_str());
+    response->addHeader("X-Meter-Boxes",boxes.c_str());response->addHeader("X-Meter-References",references.c_str());response->addHeader("X-Meter-Decimals",decimals.c_str());response->addHeader("X-Meter-Corrected",rgb?"1":"0");
     r->send(response);return;
   }
   if(url=="/meter/snapshot" && r->method()==HTTP_GET) {
@@ -860,6 +869,7 @@ void MeterSetup::handleRequest(AsyncWebServerRequest *r) {
   r->send(200,"text/plain","Aktion vorgemerkt");
 }
 void MeterSetup::set_preview_(const std::shared_ptr<uint8_t> &data,size_t size,bool rgb) {
+  preview_jpeg_.reset();preview_jpeg_size_=0;preview_encode_pending_=preview_encode_failed_=false;
   preview_=data;preview_size_=size;preview_rgb_=rgb;preview_decimals_=(test_?pending_:settings_).decimals;
   preview_boxes_=zones(test_?pending_:settings_);
   preview_references_="[";

@@ -178,6 +178,11 @@ class MeterSetup : public Component, public camera::CameraListener, public Async
   std::shared_ptr<uint8_t> preview_;
   size_t preview_size_{0};
   bool preview_rgb_{false};
+  void prepare_preview_();
+  std::shared_ptr<uint8_t> preview_jpeg_;
+  size_t preview_jpeg_size_{0};
+  uint32_t preview_jpeg_sequence_{0};
+  bool preview_encode_pending_{false},preview_encode_failed_{false};
   uint32_t preview_sequence_{0};
   std::string preview_boxes_,preview_references_;
   void record_fault_(const std::string &reason,bool automatic_restart);
