@@ -5,10 +5,7 @@ mqtt:
   username: !secret mqtt_username
   password: !secret mqtt_password
   topic_prefix: ${device_name}
-  # MQTT Discovery is published by meter_setup with stable, human-readable
-  # IDs and the project's camera entity. Keep ESPHome's automatic discovery
-  # disabled to prevent a second, hash-based entity set.
-  discovery: false
+  discovery: true
   discovery_unique_id_generator: mac
   discovery_object_id_generator: device_name
   reboot_timeout: 0s
