@@ -174,7 +174,10 @@ void MeterSetup::mqtt_loop_() {
     {"problem","Ableseproblem","binary_sensor","","problem",""}};
   char mac_buffer[MAC_ADDRESS_BUFFER_SIZE];get_mac_address_into_buffer(mac_buffer);const std::string mac(mac_buffer);
   // Publish one discovery record per loop; retry failures without filling the outbox.
-  if(!mqtt_discovered_&&client->is_discovery_enabled()) {
+  // This component owns the MQTT Discovery records. Do not couple these
+  // project-specific entities to ESPHome's automatic discovery switch:
+  // automatic discovery is disabled to avoid a duplicate hash-based set.
+  if(!mqtt_discovered_) {
     const bool camera=mqtt_discovery_index_==0;
     const auto &field=fields[camera?0:mqtt_discovery_index_-1];
     const std::string key=camera?"kamerabild":field.key;
